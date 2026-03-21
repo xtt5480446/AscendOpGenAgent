@@ -33,7 +33,7 @@ class TaskConfig:
     agent_name: str
     agent_workspace: str
     level_problems: Dict[int, Optional[Any]]  # {level: [problem_ids] or None}
-    benchmark_path: str = "/mnt/w00934874/agent/benchmark/KernelBench"
+    benchmark_path: str = ""  # 空字符串表示自动推导: agent_workspace/KernelBench/KernelBench
     output_root: str = "./benchmark_results"
     arch: str = "ascend910b1"
     resume: bool = True
@@ -817,6 +817,12 @@ class BenchmarkEvaluator:
         )
         os.makedirs(self.output_dir, exist_ok=True)
         
+        # 如果 benchmark_path 为空，自动推导
+        if not self.config.benchmark_path:
+            self.config.benchmark_path = os.path.join(
+                self.config.agent_workspace, "KernelBench", "KernelBench"
+            )
+        
         # 初始化状态管理器
         self.state_manager = StateManager(self.output_dir)
         
@@ -915,14 +921,14 @@ def main():
     """主函数"""
     # 示例配置 - 使用 agent workspace 内的 KernelBench
     # 直接调用 kernelgen-workflow subagent
-    agent_workspace = "/mnt/w00934874/agent/code/AscendOpGenAgent/akg-triton/.opencode"
+    agent_workspace = "."
     
     config = TaskConfig(
-        agent_name="kernelgen-workflow",  # 直接指定 subagent
-        agent_workspace=agent_workspace,
-        level_problems={1: [3]},  # Level 1 的 problem 3
-        benchmark_path=os.path.join(agent_workspace, "KernelBench", "KernelBench"),
-        arch="ascend910b1"
+        agent_name=args.agent_name,
+        agent_workspace=args.agent_workspace,
+        level_problems=level_problems,
+        # benchmark_path 留空，自动推导为 agent_workspace/KernelBench/KernelBench
+        arch=args.arch
     )
     
     evaluator = BenchmarkEvaluator(config)
