@@ -38,11 +38,16 @@ def benchmark_implementations(op_name, verify_dir, warmup=5, repeats=50):
     
     device = torch.device("npu")
     
-    # 初始化模型
+    init_params = get_init_inputs()
+
+    # 分别在每个模型创建前重置种子，确保含随机权重的算子（如 Conv2d）
+    # 在 Model 和 ModelNew 中获得完全一致的初始化参数
     torch.manual_seed(0)
     torch.npu.manual_seed(0)
-    init_params = get_init_inputs()
     framework_model = FrameworkModel(*init_params).to(device)
+
+    torch.manual_seed(0)
+    torch.npu.manual_seed(0)
     impl_model = ModelNew(*init_params).to(device)
     
     # 准备输入数据（预热时生成一次，正式测试时复用）

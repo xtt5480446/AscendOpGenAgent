@@ -136,6 +136,43 @@ class ModelNew(nn.Module):
 | 自包含 | 所有 kernel 函数和辅助函数必须定义在同一文件内 |
 | 可执行 | 代码必须可以直接导入运行 |
 | 无测试代码 | 不需要生成测试代码 |
+| 权重一致 | 含随机权重的算子（Conv2d/Linear 等）必须通过固定种子确保权重一致 |
+
+### 含随机权重算子的权重一致性（关键！）
+
+当任务描述中的 `Model` 类包含 `nn.Conv2d`、`nn.Linear`、`nn.ConvTranspose2d` 等带可学习参数的模块，或者使用 `torch.randn` / `nn.Parameter(torch.randn(...))` 创建随机参数时，**必须**在 `ModelNew.__init__` 中通过固定随机种子来确保与原 `Model` 的权重完全一致。
+
+**原理**：验证框架会在创建 `Model` 前调用 `torch.manual_seed(0)`，再在创建 `ModelNew` 前再次调用 `torch.manual_seed(0)`。只要两者在 `__init__` 内部以相同的顺序创建参数，就能获得完全一致的权重。
+
+**标准模式**：
+
+```python
+class ModelNew(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, ...):
+        super().__init__()
+        # 1. 固定种子 — 必须与验证框架中的种子一致 (0)
+        torch.manual_seed(0)
+
+        # 2. 按照原 Model 的**完全相同的顺序**创建模块并提取权重
+        #    确保随机数消耗顺序一致
+        conv = nn.Conv2d(in_channels, out_channels, kernel_size)
+        self.weight = nn.Parameter(conv.weight.clone())
+        self.bias = nn.Parameter(conv.bias.clone()) if conv.bias is not None else None
+
+        # 如果原 Model 还有其他随机参数（如 nn.Parameter(torch.randn(...))），
+        # 也必须在此按相同顺序创建
+        self.extra_bias = nn.Parameter(torch.randn(bias_shape))
+
+    def forward(self, x):
+        # 使用提取的权重调用自定义 kernel
+        return custom_conv_kernel(x, self.weight, self.bias, ...)
+```
+
+**核心要点**：
+1. `ModelNew.__init__` 的**第一行**必须调用 `torch.manual_seed(0)`
+2. 参数创建的**顺序**必须与原 `Model.__init__` 完全一致（因为每次 `torch.randn` 调用会推进随机状态）
+3. 通过创建相同的 `nn.Module`（如 `nn.Conv2d`）来获取权重，而非手动 `torch.randn` —— 这保证内部参数的 shape 和初始化方式一致
+4. 如果原 `Model` 有多个含权重的模块，必须按**原顺序**逐一创建并提取
 
 ---
 

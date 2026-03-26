@@ -134,11 +134,16 @@ def verify_implementations(op_name, verify_dir):
     import torch_npu  # noqa: F401
     device = torch.device("npu")
 
+    init_params = get_init_inputs()
+
+    # 分别在每个模型创建前重置种子，确保含随机权重的算子（如 Conv2d）
+    # 在 Model 和 ModelNew 中获得完全一致的初始化参数
     torch.manual_seed(0)
     torch.npu.manual_seed(0)
-
-    init_params = get_init_inputs()
     framework_model = FrameworkModel(*init_params).to(device)
+
+    torch.manual_seed(0)
+    torch.npu.manual_seed(0)
     impl_model = ModelNew(*init_params).to(device)
 
     torch.manual_seed(0)
