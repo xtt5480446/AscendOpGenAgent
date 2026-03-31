@@ -142,24 +142,53 @@ Agent 接收到指令后，将自动执行以下流程：确认参数 → 提取
 - `ASCEND_RT_VISIBLE_DEVICES`: **[可选]** 指定使用的 NPU 设备 ID。
 
 ### 评测基线
-#### Triton（更新于 2026-03-20）
+#### Triton（更新于 2026-03-27）
 
 - **测试设备**：Ascend 910B2
-- **总任务数**：12
+- **总任务数**：40
 
-| Level | Problem ID | 算子名称 | 编译通过 | 精度正确 | PyTorch 延迟 | 生成代码延迟 | 加速比 | 最终状态 |
-|:---:|:---:|---|:---:|:---:|---:|---:|---:|:---:|
-| 1 | 1 | `Square_matrix_multiplication_` | ✅ | ✅ | 1.65 ms | 2.95 ms | 0.56x | 成功 |
-| 1 | 2 | `Standard_matrix_multiplication_` | ✅ | ✅ | 1.65 ms | 7.82 ms | 0.21x | 成功 |
-| 1 | 3 | `Batched_matrix_multiplication` | ✅ | ✅ | 3.64 ms | 9.70 ms | 0.38x | 成功 |
-| 1 | 4 | `Matrix_vector_multiplication_` | ✅ | ✅ | 36.26 ms | 162.41 ms | 0.22x | 成功 |
-| 1 | 5 | `Matrix_scalar_multiplication` | ✅ | ✅ | 6.80 ms | 7.70 ms | 0.88x | 成功 |
-| 1 | 6 | `Matmul_with_large_K_dimension_` | ✅ | ✅ | 2.35 ms | 2.35 ms | 1.00x | 成功 |
-| 1 | 7 | `Matmul_with_small_K_dimension_` | ✅ | ✅ | 3.34 ms | 4.07 ms | 0.82x | 成功 |
-| 1 | 8 | `Matmul_with_irregular_shapes_` | ✅ | ✅ | 4.24 ms | 4.28 ms | 0.99x | 成功 |
-| 1 | 9 | `Tall_skinny_matrix_multiplication_` | ✅ | ✅ | 3.20 ms | 4.02 ms | 0.79x | 成功 |
-| 2 | 3 | `ConvTranspose3d_Sum_LayerNorm_AvgPool_GELU` | ✅ | ✅ | 16.11 ms | 16.99 ms | 0.95x | 成功 |
-| 3 | 4 | `LeNet5` | ✅ | ✅ | 1.72 ms | 113.54 ms | 0.02x | 成功 |
+| Level | Problem ID | 算子名称 | 编译通过 | 精度正确 | PyTorch 延迟 |     生成代码延迟 | 加速比 | 最终状态 |
+|:---:|:---:|---|:---:|:---:|-----------:|-----------:|---:|:---:|
+| 1 | 2 | `Standard matrix multiplication` | ✅ | ✅ |    1.65 ms |    1.70 ms | 0.97x | 成功 |
+| 1 | 4 | `Matrix vector multiplication` | ✅ | ✅ |   36.94 ms |    9.54 ms | 3.87x | 成功 |
+| 1 | 10 | `3D tensor matrix multiplication` | ✅ | ✅ |    0.62 ms |    0.81 ms | 0.76x | 成功 |
+| 1 | 11 | `4D tensor matrix multiplication` | ✅ | ✅ |    5.67 ms |    6.08 ms | 0.93x | 成功 |
+| 1 | 12 | `Matmul with diagonal matrices` | ✅ | ✅ |    0.07 ms |    0.09 ms | 0.75x | 成功 |
+| 1 | 13 | `Matmul for symmetric matrices` | ✅ | ✅ |    1.65 ms |    1.68 ms | 0.98x | 成功 |
+| 1 | 14 | `Matmul for upper triangular matrices` | ✅ | ✅ |    1.66 ms |   12.78 ms | 0.13x | 成功 |
+| 1 | 15 | `Matmul for lower triangular matrices` | ✅ | ✅ |    1.71 ms |    1.76 ms | 0.98x | 成功 |
+| 1 | 16 | `Matmul with transposed A` | ✅ | ✅ |    1.65 ms | 1054.70 ms | 0.00x | 成功 |
+| 1 | 17 | `Matmul with transposed B` | ✅ | ✅ |    1.65 ms | 4983.07 ms | 0.00x | 成功 |
+| 1 | 33 | `BatchNorm` | ✅ | ✅ |   10.09 ms | 2653.64 ms | 0.00x | 成功 |
+| 1 | 34 | `InstanceNorm` | ✅ | ✅ |   16.68 ms |  128.41 ms | 0.13x | 成功 |
+| 1 | 35 | `GroupNorm` | ✅ | ✅ |   17.96 ms |   93.06 ms | 0.19x | 成功 |
+| 1 | 36 | `RMSNorm` | ✅ | ✅ |   33.60 ms | 1146.41 ms | 0.03x | 成功 |
+| 1 | 41 | `Max_Pooling_1D` | ✅ | ✅ |   22.64 ms | 6583.55 ms | 0.00x | 成功 |
+| 1 | 42 | `Max_Pooling_2D` | ✅ | ✅ |          - |          - | - | 成功 |
+| 1 | 43 | `Max_Pooling_3D` | ✅ | ✅ |          - |    8.34 ms | - | 成功 |
+| 1 | 44 | `Average_Pooling_1D` | ✅ | ✅ |   20.52 ms |   63.92 ms | 0.32x | 成功 |
+| 1 | 45 | `Average_Pooling_2D` | ✅ | ✅ |    3.89 ms |    2.67 ms | 1.46x | 成功 |
+| 1 | 46 | `Average_Pooling_3D` | ✅ | ✅ |    0.17 ms |    0.08 ms | - | 成功 |
+| 1 | 48 | `Mean reduction over a dimension` | ✅ | ✅ |    7.69 ms |  248.97 ms | 0.03x | 成功 |
+| 1 | 50 | `conv standard 2D square input square kernel` | ✅ | ✅ |          - |          - | - | 成功 |
+| 1 | 51 | `Argmax over a dimension` | ✅ | ✅ |          - |          - | - | 成功 |
+| 1 | 53 | `Min reduction over a dimension` | ✅ | ✅ |   18.13 ms |   22.97 ms | 0.79x | 成功 |
+| 1 | 54 | `conv standard 3D square input square kernel` | ✅ | ✅ |          - |          - | - | 成功 |
+| 1 | 57 | `conv transposed 2D square input square kernel` | ❌ | ❌ |          - |          - | - | 失败 |
+| 1 | 61 | `conv transposed 3D square input square kernel` | ✅ | ✅ |          - |          - | - | 成功 |
+| 1 | 63 | `conv standard 2D square input square kernel` | ❌ | ❌ |   23.59 ms |  166.72 ms | - | 失败 |
+| 1 | 64 | `conv transposed 1D` | ❌ | ❌ |          - |          - | - | 失败 |
+| 1 | 67 | `conv standard 1D` | ✅ | ✅ |          - |          - | - | 成功 |
+| 1 | 82 | `conv depthwise 2D square input square kernel` | ✅ | ✅ |          - |          - | - | 成功 |
+| 1 | 87 | `conv pointwise 2D` | ✅ | ✅ |   31.63 ms | 4304.04 ms | 0.01x | 成功 |
+| 1 | 99 | `TripletMarginLoss` | ✅ | ✅ |   10.68 ms |    4.60 ms | 2.32x | 成功 |
+| 1 | 100 | `HingeLoss` | ✅ | ✅ |   31.67 ms | 1283.66 ms | 0.02x | 成功 |
+| 2 | 6 | `Conv3d Softmax MaxPool MaxPool` | ✅ | ✅ |    0.48 ms |          - | - | 成功 |
+| 2 | 12 | `Gemm Multiply LeakyReLU` | ✅ | ✅ |    0.61 ms |    0.62 ms | 0.98x | 成功 |
+| 2 | 17 | `Conv2d InstanceNorm Divide` | ✅ | ✅ |    3.03 ms |    3.25 ms | 0.93x | 成功 |
+| 2 | 23 | `Conv3d GroupNorm Mean` | ✅ | ✅ |    0.65 ms |    0.65 ms | 1.00x | 成功 |
+| 2 | 30 | `Gemm GroupNorm Hardtanh` | ✅ | ✅ |    0.66 ms |    0.63 ms | 1.04x | 成功 |
+| 2 | 94 | `Gemm BiasAdd Hardtanh Mish GroupNorm` | ❌ | ❌ |    0.66 ms |    0.66 ms | - | 失败 |
 
 #### AscendC（更新于 2026-03-27）
 - **测试设备**：Ascend 910B2
