@@ -144,51 +144,7 @@ Serially generate tasks of level 1 in NPUKernelBench, with agent_workspace set t
 ### Evaluation Baseline 
 #### Triton(Updated 2026-03-27)
 
-- **Test Device**: Ascend 910B2
-- **Total Tasks**: 40
-
-| Level | Problem ID | Operator Name | Compilation | Accuracy | PyTorch Latency | Generated Code Latency | Speedup | Final Status |
-|:---:|:---:|---|:---:|:---:|---:|---:|---:|:---:|
-| 1 | 2 | `Standard matrix multiplication` | ✅ | ✅ | 1.65 ms | 1.70 ms | 0.97x | success |
-| 1 | 4 | `Matrix vector multiplication` | ✅ | ✅ | 36.94 ms | 9.54 ms | 3.87x | success |
-| 1 | 10 | `3D tensor matrix multiplication` | ✅ | ✅ | 0.62 ms | 0.81 ms | 0.76x | success |
-| 1 | 11 | `4D tensor matrix multiplication` | ✅ | ✅ | 5.67 ms | 6.08 ms | 0.93x | success |
-| 1 | 12 | `Matmul with diagonal matrices` | ✅ | ✅ | 0.07 ms | 0.09 ms | 0.75x | success |
-| 1 | 13 | `Matmul for symmetric matrices` | ✅ | ✅ | 1.65 ms | 1.68 ms | 0.98x | success |
-| 1 | 14 | `Matmul for upper triangular matrices` | ✅ | ✅ | 1.66 ms | 12.78 ms | 0.13x | success |
-| 1 | 15 | `Matmul for lower triangular matrices` | ✅ | ✅ | 1.71 ms | 1.76 ms | 0.98x | success |
-| 1 | 16 | `Matmul with transposed A` | ✅ | ✅ | 1.65 ms | 1054.70 ms | 0.00x | success |
-| 1 | 17 | `Matmul with transposed B` | ✅ | ✅ |    1.65 ms | 4983.07 ms | 0.00x | success |
-| 1 | 33 | `BatchNorm` | ✅ | ✅ | 10.09 ms | 2653.64 ms | 0.00x | success |
-| 1 | 34 | `InstanceNorm` | ✅ | ✅ | 16.68 ms | 128.41 ms | 0.13x | success |
-| 1 | 35 | `GroupNorm` | ✅ | ✅ | 17.96 ms | 93.06 ms | 0.19x | success |
-| 1 | 36 | `RMSNorm` | ✅ | ✅ | 33.60 ms | 1146.41 ms | 0.03x | success |
-| 1 | 41 | `Max_Pooling_1D` | ✅ | ✅ | 22.64 ms | 6583.55 ms | 0.00x | success |
-| 1 | 42 | `Max_Pooling_2D` | ✅ | ✅ | - | - | - | success |
-| 1 | 43 | `Max_Pooling_3D` | ✅ | ✅ | - | 8.34 ms | - | success |
-| 1 | 44 | `Average_Pooling_1D` | ✅ | ✅ | 20.52 ms | 63.92 ms | 0.32x | success |
-| 1 | 45 | `Average_Pooling_2D` | ✅ | ✅ | 3.89 ms | 2.67 ms | 1.46x | success |
-| 1 | 46 | `Average_Pooling_3D` | ✅ | ✅ | 0.17 ms | 0.08 ms | - | success |
-| 1 | 48 | `Mean reduction over a dimension` | ✅ | ✅ | 7.69 ms | 248.97 ms | 0.03x | success |
-| 1 | 50 | `conv standard 2D square input square kernel` | ✅ | ✅ | - | - | - | success |
-| 1 | 51 | `Argmax over a dimension` | ✅ | ✅ | - | - | - | success |
-| 1 | 53 | `Min reduction over a dimension` | ✅ | ✅ | 18.13 ms | 22.97 ms | 0.79x | success |
-| 1 | 54 | `conv standard 3D square input square kernel` | ✅ | ✅ | - | - | - | success |
-| 1 | 57 | `conv transposed 2D square input square kernel` | ❌ | ❌ | - | - | - | failure |
-| 1 | 61 | `conv transposed 3D square input square kernel` | ✅ | ✅ | - | - | - | success |
-| 1 | 63 | `conv standard 2D square input square kernel` | ❌ | ❌ | 23.59 ms | 166.72 ms | - | failure |
-| 1 | 64 | `conv transposed 1D` | ❌ | ❌ | - | - | - | failure |
-| 1 | 67 | `conv standard 1D` | ✅ | ✅ | - | - | - | success |
-| 1 | 82 | `conv depthwise 2D square input square kernel` | ✅ | ✅ | - | - | - | success |
-| 1 | 87 | `conv pointwise 2D` | ✅ | ✅ | 31.63 ms | 4304.04 ms | 0.01x | success |
-| 1 | 99 | `TripletMarginLoss` | ✅ | ✅ | 10.68 ms | 4.60 ms | 2.32x | success |
-| 1 | 100 | `HingeLoss` | ✅ | ✅ | 31.67 ms | 1283.66 ms | 0.02x | success |
-| 2 | 6 | `Conv3d Softmax MaxPool MaxPool` | ✅ | ✅ | 0.48 ms | - | - | success |
-| 2 | 12 | `Gemm Multiply LeakyReLU` | ✅ | ✅ | 0.61 ms | 0.62 ms | 0.98x | success |
-| 2 | 17 | `Conv2d InstanceNorm Divide` | ✅ | ✅ | 3.03 ms | 3.25 ms | 0.93x | success |
-| 2 | 23 | `Conv3d GroupNorm Mean` | ✅ | ✅ | 0.65 ms | 0.65 ms | 1.00x | success |
-| 2 | 30 | `Gemm GroupNorm Hardtanh` | ✅ | ✅ | 0.66 ms | 0.63 ms | 1.04x | success |
-| 2 | 94 | `Gemm BiasAdd Hardtanh Mish GroupNorm` | ❌ | ❌ | 0.66 ms | 0.66 ms | - | failure |
+Please refer to [`benchmarks/BASELINE.md`](benchmarks/BASELINE.md)  for Triton-related data.
 
 #### AscendC(Updated 2026-03-27)
 - **Test Device**: Ascend 910B2
