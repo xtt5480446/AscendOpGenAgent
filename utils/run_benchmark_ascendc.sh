@@ -10,7 +10,7 @@
 #   bash .claude/run_benchmark _ascendc.sh --benchmark-dir /path/to/KernelBench --level 1 --ids "3,7,15,22" --npu 6 --output /path/to/output
 
 # ── 环境变量 ──
-export ANTHROPIC_AUTH_TOKEN=sk-nCr9HiU5IspzH5XbkYPrUcjtoJbIHWoLIg5zCoc5GigKXqXK  # 替换为您的实际令牌
+export ANTHROPIC_AUTH_TOKEN=sk-  # 替换为您的实际令牌
 export ANTHROPIC_BASE_URL=https://yunwu.ai
 export API_TIMEOUT_MS=300000  # 设置为 300 秒超时
 
