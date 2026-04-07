@@ -14,7 +14,7 @@
 - 分支：main @ latest
 - 更新时间：2026-03-27
 - 硬件：Atlas A2 服务器
-- 软件栈：CANN 8.0, PyTorch 2.1
+- 软件栈：CANN 8.5.1, PyTorch 2.9.0
 - 评测范围：Level 1 (34 tasks) + Level 2 (6 tasks) = 40 tasks
 
 **评测综述**

@@ -114,11 +114,11 @@ mv agents/triton-ascend-coder.md .claude/CLAUDE.md
 2. Enter the AscendOpGenAgent directory and execute the batch scheduling script:
 ```bash
 cd /path/to/AscendOpGenAgent
-bash .claude/batch_run.sh \
+bash utils/run_benchmark.sh \
     --benchmark-dir /path/to/KernelBench \
     --level 1 \
-    --range 41-53 \
-    --npu 6 \
+    --range 1-10 \
+    --npu 0 \
     --output /path/to/output
 ```
 
