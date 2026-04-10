@@ -191,6 +191,8 @@ def _run_performance(op: str, impls, warmup: int, repeat: int, seed: int):
     report["task_dir"] = str(task_dir)
     device = _get_device()
 
+    task_parent = str(task_dir.parent)
+    sys.path.insert(0, task_parent)
     sys.path.insert(0, str(WORKDIR))
     try:
         ref_module = None
@@ -271,6 +273,8 @@ def _run_performance(op: str, impls, warmup: int, repeat: int, seed: int):
     finally:
         if str(WORKDIR) in sys.path:
             sys.path.remove(str(WORKDIR))
+        if task_parent in sys.path:
+            sys.path.remove(task_parent)
 
 
 def _print_report(report):
