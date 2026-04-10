@@ -32,8 +32,8 @@ def rms_norm(M, N, eps=1e-5, in_dtype="float32", out_dtype="float32"):
     row_factor = 8
     row_loops = T.ceildiv(sub_block_M, row_factor)
     n_num = T.ceildiv(N, block_N)
-    need_cast_in = in_dtype != "float32"
-    need_cast_out = out_dtype != "float32"
+    need_cast_input = in_dtype != "float32"
+    need_cast_output = out_dtype != "float32"
     out_cast_mode = "CAST_ROUND" if out_dtype == "bfloat16" else "CAST_NONE"
 
     eps_const = T.float32(eps)
@@ -46,11 +46,11 @@ def rms_norm(M, N, eps=1e-5, in_dtype="float32", out_dtype="float32"):
         Y: T.Tensor((M, N), out_dtype),
     ):
         with T.Kernel(used_core_num, is_npu=True) as (cid, vid):
-            x_in_ub = T.alloc_ub((row_factor, N), in_dtype)
             gamma_in_ub = T.alloc_ub((1, N), in_dtype)
-            out_cast_ub = T.alloc_ub((row_factor, N), out_dtype)
-            single_x_in_ub = T.alloc_ub((1, N), in_dtype)
-            single_out_cast_ub = T.alloc_ub((1, N), out_dtype)
+            x_in_rows_ub = T.alloc_ub((row_factor, N), in_dtype)
+            out_cast_rows_ub = T.alloc_ub((row_factor, N), out_dtype)
+            single_x_in_row_ub = T.alloc_ub((1, N), in_dtype)
+            single_out_cast_row_ub = T.alloc_ub((1, N), out_dtype)
             x_ub = T.alloc_ub((row_factor, N), "float32")
             x_sq_ub = T.alloc_ub((row_factor, N), "float32")
             gamma_ub = T.alloc_ub((1, N), "float32")
@@ -62,24 +62,18 @@ def rms_norm(M, N, eps=1e-5, in_dtype="float32", out_dtype="float32"):
 
             single_x_ub = T.alloc_ub((1, N), "float32")
             single_x_sq_ub = T.alloc_ub((1, N), "float32")
-            single_sum_sq_ub = T.alloc_ub((1, 1), "float32")
-            single_rstd_ub = T.alloc_ub((1, 1), "float32")
-            single_rstd_broad_ub = T.alloc_ub((1, N), "float32")
             single_out_ub = T.alloc_ub((1, N), "float32")
 
             inv_n_ub = T.alloc_ub((row_factor, 1), "float32")
             eps_ub = T.alloc_ub((row_factor, 1), "float32")
-            single_inv_n_ub = T.alloc_ub((1, 1), "float32")
-            single_eps_ub = T.alloc_ub((1, 1), "float32")
 
             reduce_tmp = T.alloc_ub((2 * row_factor * N,), "uint8")
             gamma_bcast_tmp = T.alloc_ub((2 * row_factor, N), "uint8")
             rstd_bcast_tmp = T.alloc_ub((2 * row_factor, N), "uint8")
             single_reduce_tmp = T.alloc_ub((2 * N,), "uint8")
-            single_bcast_tmp = T.alloc_ub((2, N), "uint8")
 
             with T.Scope("V"):
-                if need_cast_in:
+                if need_cast_input:
                     T.copy(Gamma[0], gamma_in_ub)
                     T.tile.cast(gamma_ub, gamma_in_ub, mode="CAST_NONE", count=N)
                 else:
@@ -87,8 +81,6 @@ def rms_norm(M, N, eps=1e-5, in_dtype="float32", out_dtype="float32"):
                 T.tile.broadcast(gamma_broad_ub, gamma_ub, gamma_bcast_tmp)
                 T.tile.fill(inv_n_ub, inv_n_const)
                 T.tile.fill(eps_ub, eps_const)
-                T.tile.fill(single_inv_n_ub, inv_n_const)
-                T.tile.fill(single_eps_ub, eps_const)
 
                 for local_idx in T.serial(tasks_per_core):
                     bx = cid * tasks_per_core + local_idx
@@ -96,9 +88,9 @@ def rms_norm(M, N, eps=1e-5, in_dtype="float32", out_dtype="float32"):
                         for r in T.serial(row_loops):
                             row_base = bx * block_M + vid * sub_block_M + r * row_factor
                             if row_base + row_factor <= M:
-                                if need_cast_in:
-                                    T.copy(X[row_base:row_base + row_factor, :], x_in_ub)
-                                    T.tile.cast(x_ub, x_in_ub, mode="CAST_NONE", count=row_factor * N)
+                                if need_cast_input:
+                                    T.copy(X[row_base:row_base + row_factor, :], x_in_rows_ub)
+                                    T.tile.cast(x_ub, x_in_rows_ub, mode="CAST_NONE", count=row_factor * N)
                                 else:
                                     T.copy(X[row_base:row_base + row_factor, :], x_ub)
                                 T.tile.mul(x_sq_ub, x_ub, x_ub)
@@ -109,31 +101,31 @@ def rms_norm(M, N, eps=1e-5, in_dtype="float32", out_dtype="float32"):
                                 T.tile.broadcast(rstd_broad_ub, rstd_ub, rstd_bcast_tmp)
                                 T.tile.mul(out_ub, x_ub, rstd_broad_ub)
                                 T.tile.mul(out_ub, out_ub, gamma_broad_ub)
-                                if need_cast_out:
-                                    T.tile.cast(out_cast_ub, out_ub, mode=out_cast_mode, count=row_factor * N)
-                                    T.copy(out_cast_ub, Y[row_base:row_base + row_factor, :])
+                                if need_cast_output:
+                                    T.tile.cast(out_cast_rows_ub, out_ub, mode=out_cast_mode, count=row_factor * N)
+                                    T.copy(out_cast_rows_ub, Y[row_base:row_base + row_factor, :])
                                 else:
                                     T.copy(out_ub, Y[row_base:row_base + row_factor, :])
                             else:
                                 for rr in T.serial(row_factor):
                                     row_idx = row_base + rr
                                     if row_idx < M:
-                                        if need_cast_in:
-                                            T.copy(X[row_idx, :], single_x_in_ub)
-                                            T.tile.cast(single_x_ub, single_x_in_ub, mode="CAST_NONE", count=N)
+                                        if need_cast_input:
+                                            T.copy(X[row_idx, :], single_x_in_row_ub)
+                                            T.tile.cast(single_x_ub, single_x_in_row_ub, mode="CAST_NONE", count=N)
                                         else:
                                             T.copy(X[row_idx, :], single_x_ub)
                                         T.tile.mul(single_x_sq_ub, single_x_ub, single_x_ub)
-                                        T.reduce_sum(single_x_sq_ub, single_sum_sq_ub, single_reduce_tmp, dim=-1)
-                                        T.tile.mul(single_sum_sq_ub, single_sum_sq_ub, single_inv_n_ub)
-                                        T.tile.add(single_sum_sq_ub, single_sum_sq_ub, single_eps_ub)
-                                        T.tile.rsqrt(single_rstd_ub, single_sum_sq_ub)
-                                        T.tile.broadcast(single_rstd_broad_ub, single_rstd_ub, single_bcast_tmp)
-                                        T.tile.mul(single_out_ub, single_x_ub, single_rstd_broad_ub)
+                                        T.reduce_sum(single_x_sq_ub, single_x_sq_ub[:, 0], single_reduce_tmp, dim=-1)
+                                        single_sum_sq = single_x_sq_ub[0, 0] * inv_n_const + eps_const
+                                        single_x_sq_ub[0, 0] = single_sum_sq
+                                        T.tile.rsqrt(single_x_sq_ub[:, 0], single_x_sq_ub[:, 0])
+                                        single_rstd = single_x_sq_ub[0, 0]
+                                        T.tile.mul(single_out_ub, single_x_ub, single_rstd)
                                         T.tile.mul(single_out_ub, single_out_ub, gamma_ub)
-                                        if need_cast_out:
-                                            T.tile.cast(single_out_cast_ub, single_out_ub, mode=out_cast_mode, count=N)
-                                            T.copy(single_out_cast_ub, Y[row_idx, :])
+                                        if need_cast_output:
+                                            T.tile.cast(single_out_cast_row_ub, single_out_ub, mode=out_cast_mode, count=N)
+                                            T.copy(single_out_cast_row_ub, Y[row_idx, :])
                                         else:
                                             T.copy(single_out_ub, Y[row_idx, :])
 
@@ -144,30 +136,22 @@ def rms_norm(M, N, eps=1e-5, in_dtype="float32", out_dtype="float32"):
         Y: T.Tensor((M, N), out_dtype),
     ):
         with T.Kernel(used_core_num, is_npu=True) as (cid, vid):
-            x_in_ub = T.alloc_ub((1, N), in_dtype)
-            gamma_in_ub = T.alloc_ub((1, N), in_dtype)
-            out_cast_ub = T.alloc_ub((1, N), out_dtype)
+            gamma_in_row_ub = T.alloc_ub((1, N), in_dtype)
+            x_in_row_ub = T.alloc_ub((1, N), in_dtype)
+            out_cast_row_ub = T.alloc_ub((1, N), out_dtype)
             x_ub = T.alloc_ub((1, N), "float32")
             x_sq_ub = T.alloc_ub((1, N), "float32")
             gamma_ub = T.alloc_ub((1, N), "float32")
-            sum_sq_ub = T.alloc_ub((1, 1), "float32")
-            inv_rms_ub = T.alloc_ub((1, 1), "float32")
-            inv_rms_broad_ub = T.alloc_ub((1, N), "float32")
             out_ub = T.alloc_ub((1, N), "float32")
-            inv_n_ub = T.alloc_ub((1, 1), "float32")
-            eps_ub = T.alloc_ub((1, 1), "float32")
 
             reduce_tmp = T.alloc_ub((2 * N,), "uint8")
-            broadcast_tmp = T.alloc_ub((2, N), "uint8")
 
             with T.Scope("V"):
-                if need_cast_in:
-                    T.copy(Gamma[0], gamma_in_ub)
-                    T.tile.cast(gamma_ub, gamma_in_ub, mode="CAST_NONE", count=N)
+                if need_cast_input:
+                    T.copy(Gamma[0], gamma_in_row_ub)
+                    T.tile.cast(gamma_ub, gamma_in_row_ub, mode="CAST_NONE", count=N)
                 else:
                     T.copy(Gamma[0], gamma_ub)
-                T.tile.fill(inv_n_ub, inv_n_const)
-                T.tile.fill(eps_ub, eps_const)
 
                 for local_idx in T.serial(tasks_per_core):
                     bx = cid * tasks_per_core + local_idx
@@ -175,22 +159,22 @@ def rms_norm(M, N, eps=1e-5, in_dtype="float32", out_dtype="float32"):
                         for row in T.serial(sub_block_M):
                             row_idx = bx * block_M + vid * sub_block_M + row
                             if row_idx < M:
-                                if need_cast_in:
-                                    T.copy(X[row_idx, :], x_in_ub)
-                                    T.tile.cast(x_ub, x_in_ub, mode="CAST_NONE", count=N)
+                                if need_cast_input:
+                                    T.copy(X[row_idx, :], x_in_row_ub)
+                                    T.tile.cast(x_ub, x_in_row_ub, mode="CAST_NONE", count=N)
                                 else:
                                     T.copy(X[row_idx, :], x_ub)
                                 T.tile.mul(x_sq_ub, x_ub, x_ub)
-                                T.reduce_sum(x_sq_ub, sum_sq_ub, reduce_tmp, dim=-1)
-                                T.tile.mul(sum_sq_ub, sum_sq_ub, inv_n_ub)
-                                T.tile.add(sum_sq_ub, sum_sq_ub, eps_ub)
-                                T.tile.rsqrt(inv_rms_ub, sum_sq_ub)
-                                T.tile.broadcast(inv_rms_broad_ub, inv_rms_ub, broadcast_tmp)
-                                T.tile.mul(out_ub, x_ub, inv_rms_broad_ub)
+                                T.reduce_sum(x_sq_ub, x_sq_ub[:, 0], reduce_tmp, dim=-1)
+                                sum_sq = x_sq_ub[0, 0] * inv_n_const + eps_const
+                                x_sq_ub[0, 0] = sum_sq
+                                T.tile.rsqrt(x_sq_ub[:, 0], x_sq_ub[:, 0])
+                                inv_rms = x_sq_ub[0, 0]
+                                T.tile.mul(out_ub, x_ub, inv_rms)
                                 T.tile.mul(out_ub, out_ub, gamma_ub)
-                                if need_cast_out:
-                                    T.tile.cast(out_cast_ub, out_ub, mode=out_cast_mode, count=N)
-                                    T.copy(out_cast_ub, Y[row_idx, :])
+                                if need_cast_output:
+                                    T.tile.cast(out_cast_row_ub, out_ub, mode=out_cast_mode, count=N)
+                                    T.copy(out_cast_row_ub, Y[row_idx, :])
                                 else:
                                     T.copy(out_ub, Y[row_idx, :])
 
@@ -209,100 +193,66 @@ def rms_norm(M, N, eps=1e-5, in_dtype="float32", out_dtype="float32"):
             gamma_broad_ub = T.alloc_ub((1, block_N), "float32")
             out_ub = T.alloc_ub((1, block_N), "float32")
             out_cast_ub = T.alloc_ub((1, block_N), out_dtype)
-            sum_sq_ub = T.alloc_ub((1, 1), "float32")
-            partial_sum_ub = T.alloc_ub((1, 1), "float32")
-            inv_rms_ub = T.alloc_ub((1, 1), "float32")
-            inv_rms_broad_ub = T.alloc_ub((1, block_N), "float32")
-            inv_n_ub = T.alloc_ub((1, 1), "float32")
-            eps_ub = T.alloc_ub((1, 1), "float32")
 
             reduce_tmp = T.alloc_ub((2 * block_N,), "uint8")
-            inv_rms_bcast_tmp = T.alloc_ub((2, block_N), "uint8")
             gamma_bcast_tmp = T.alloc_ub((2, block_N), "uint8")
 
             with T.Scope("V"):
-                T.tile.fill(inv_n_ub, inv_n_const)
-                T.tile.fill(eps_ub, eps_const)
-
                 for local_idx in T.serial(tasks_per_core):
                     bx = cid * tasks_per_core + local_idx
                     if bx < m_num:
                         for row in T.serial(sub_block_M):
                             row_idx = bx * block_M + vid * sub_block_M + row
                             if row_idx < M:
-                                T.tile.fill(sum_sq_ub, 0.0)
+                                T.tile.fill(out_ub, 0.0)
 
                                 for by in T.serial(n_num):
                                     col_base = by * block_N
+                                    valid_n = T.if_then_else(col_base + block_N <= N, block_N, N - col_base)
                                     T.tile.fill(x_ub, 0.0)
-                                    if need_cast_in:
+                                    if need_cast_input:
                                         T.tile.fill(x_in_ub, 0.0)
-                                        if col_base + block_N <= N:
-                                            T.copy(X[row_idx:row_idx + 1, col_base:col_base + block_N], x_in_ub)
-                                        else:
-                                            T.copy(X[row_idx:row_idx + 1, col_base:N], x_in_ub[:, 0:N - col_base])
+                                        T.copy(X[row_idx:row_idx + 1, col_base:col_base + valid_n], x_in_ub[:, 0:valid_n])
                                         T.tile.cast(x_ub, x_in_ub, mode="CAST_NONE", count=block_N)
                                     else:
-                                        if col_base + block_N <= N:
-                                            T.copy(X[row_idx:row_idx + 1, col_base:col_base + block_N], x_ub)
-                                        else:
-                                            T.copy(X[row_idx:row_idx + 1, col_base:N], x_ub[:, 0:N - col_base])
+                                        T.copy(X[row_idx:row_idx + 1, col_base:col_base + valid_n], x_ub[:, 0:valid_n])
 
                                     T.tile.mul(x_sq_ub, x_ub, x_ub)
-                                    T.reduce_sum(x_sq_ub, partial_sum_ub, reduce_tmp, dim=-1)
-                                    T.tile.add(sum_sq_ub, sum_sq_ub, partial_sum_ub)
+                                    T.tile.add(out_ub, out_ub, x_sq_ub)
 
-                                T.tile.mul(sum_sq_ub, sum_sq_ub, inv_n_ub)
-                                T.tile.add(sum_sq_ub, sum_sq_ub, eps_ub)
-                                T.tile.rsqrt(inv_rms_ub, sum_sq_ub)
+                                T.reduce_sum(out_ub, out_ub[:, 0], reduce_tmp, dim=-1)
+                                x_sq_ub[0, 0] = out_ub[0, 0] * inv_n_const + eps_const
+                                T.tile.rsqrt(x_sq_ub[:, 0], x_sq_ub[:, 0])
+                                inv_rms = x_sq_ub[0, 0]
 
                                 for by in T.serial(n_num):
                                     col_base = by * block_N
+                                    valid_n = T.if_then_else(col_base + block_N <= N, block_N, N - col_base)
                                     T.tile.fill(x_ub, 0.0)
-                                    if need_cast_in:
+                                    if need_cast_input:
                                         T.tile.fill(x_in_ub, 0.0)
-                                        if col_base + block_N <= N:
-                                            T.copy(X[row_idx:row_idx + 1, col_base:col_base + block_N], x_in_ub)
-                                        else:
-                                            T.copy(X[row_idx:row_idx + 1, col_base:N], x_in_ub[:, 0:N - col_base])
+                                        T.copy(X[row_idx:row_idx + 1, col_base:col_base + valid_n], x_in_ub[:, 0:valid_n])
                                         T.tile.cast(x_ub, x_in_ub, mode="CAST_NONE", count=block_N)
                                     else:
-                                        if col_base + block_N <= N:
-                                            T.copy(X[row_idx:row_idx + 1, col_base:col_base + block_N], x_ub)
-                                        else:
-                                            T.copy(X[row_idx:row_idx + 1, col_base:N], x_ub[:, 0:N - col_base])
+                                        T.copy(X[row_idx:row_idx + 1, col_base:col_base + valid_n], x_ub[:, 0:valid_n])
 
                                     T.tile.fill(gamma_ub, 0.0)
-                                    if need_cast_in:
+                                    if need_cast_input:
                                         T.tile.fill(gamma_in_ub, 0.0)
-                                        if col_base + block_N <= N:
-                                            T.copy(Gamma[col_base:col_base + block_N], gamma_in_ub[0, :])
-                                        else:
-                                            T.copy(Gamma[col_base:N], gamma_in_ub[0, 0:N - col_base])
+                                        T.copy(Gamma[col_base:col_base + valid_n], gamma_in_ub[0, 0:valid_n])
                                         T.tile.cast(gamma_ub, gamma_in_ub, mode="CAST_NONE", count=block_N)
                                     else:
-                                        if col_base + block_N <= N:
-                                            T.copy(Gamma[col_base:col_base + block_N], gamma_ub[0, :])
-                                        else:
-                                            T.copy(Gamma[col_base:N], gamma_ub[0, 0:N - col_base])
+                                        T.copy(Gamma[col_base:col_base + valid_n], gamma_ub[0, 0:valid_n])
 
-                                    T.tile.broadcast(inv_rms_broad_ub, inv_rms_ub, inv_rms_bcast_tmp)
                                     T.tile.broadcast(gamma_broad_ub, gamma_ub, gamma_bcast_tmp)
-                                    T.tile.mul(out_ub, x_ub, inv_rms_broad_ub)
+                                    T.tile.mul(out_ub, x_ub, inv_rms)
                                     T.tile.mul(out_ub, out_ub, gamma_broad_ub)
 
-                                    if col_base + block_N <= N:
-                                        if need_cast_out:
-                                            T.tile.cast(out_cast_ub, out_ub, mode=out_cast_mode, count=block_N)
-                                            T.copy(out_cast_ub, Y[row_idx:row_idx + 1, col_base:col_base + block_N])
-                                        else:
-                                            T.copy(out_ub, Y[row_idx:row_idx + 1, col_base:col_base + block_N])
+                                    if need_cast_output:
+                                        T.tile.cast(out_cast_ub, out_ub, mode=out_cast_mode, count=block_N)
+                                        T.copy(out_cast_ub[:, 0:valid_n], Y[row_idx:row_idx + 1, col_base:col_base + valid_n])
                                     else:
-                                        if need_cast_out:
-                                            T.tile.cast(out_cast_ub, out_ub, mode=out_cast_mode, count=block_N)
-                                            T.copy(out_cast_ub[:, 0:N - col_base], Y[row_idx:row_idx + 1, col_base:N])
-                                        else:
-                                            T.copy(out_ub[:, 0:N - col_base], Y[row_idx:row_idx + 1, col_base:N])
+                                        T.copy(out_ub[:, 0:valid_n], Y[row_idx:row_idx + 1, col_base:col_base + valid_n])
 
     if N <= 1024:
         return merge_n
