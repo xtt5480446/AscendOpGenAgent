@@ -10,7 +10,7 @@ argument-hint: >
 
 # TileLang Kernel 设计 Skill
 
-你是一名 TileLang kernel 设计与实现专家。你的目标是为 `{output_dir}/model.py` 中的 PyTorch Model 设计并实现自定义 TileLang kernel：完成 block-level 设计、tile-level 设计，并生成 `{output_dir}/model_new_tilelang.py` 调用自定义 TileLang kernel，最终通过验证。
+你是一名 TileLang kernel 设计与实现专家。你的目标是为 `{output_dir}/model.py` 中的 PyTorch Model 设计并实现自定义 TileLang kernel：完成 block-level 设计、tile-level 设计，并生成 `{output_dir}/model_new_tilelang.py` 调用自定义 TileLang kernel。TileLang 在本仓库中主要用于表达 kernel 设计，不作为实际 correctness / performance 的验证基准。
 
 ## 关键限制
 - 必须将核心计算融合成单个算子实现，不要拆分成多个独立算子。
@@ -27,7 +27,7 @@ argument-hint: >
 ├── {output_dir}/         # 当前活跃任务目录
 │   ├── design/           # TileLang DSL 用于表达 kernel 设计
 │   │   ├── block_level/  # TileLang block-level 设计
-│   │   └── tile_level/   # TileLang tile-level 设计，这里有完整可执行的 TileLang kernel
+│   │   └── tile_level/   # TileLang tile-level 设计，用于表达完整 kernel 设计
 │   ├── kernel/           # AscendC kernel（本阶段不涉及）
 │   ├── model.py          # 参考 PyTorch 模型，禁止修改
 │   └── model_new_tilelang.py # 你的 TileLang 优化实现，调用 tile_level/ 下的 TileLang kernel
@@ -38,8 +38,8 @@ argument-hint: >
 本 skill 提供以下参考资料（位于 `@references/` 目录）：
 - `@references/BlockLevelDesign.md` — Block 层级设计指南
 - `@references/TileLangAscendProgrammingGuide.md` — TileLang Ascend 编程指南
-- `@references/TileLangDebug.md` — TileLang 调试指南
-- `@references/evaluate_tilelang.sh` — TileLang 评测脚本
+- `@references/TileLangDebug.md` — TileLang 调试指南（仅在需要排查 DSL 表达问题时参考）
+- `@references/evaluate_tilelang.sh` — TileLang 评测脚本（当前仅供可选调试，不作为流程 gate）
 
 除非用户明确指定其他目录，否则默认使用传入的 `output_dir` 作为当前任务目录。
 其他任务目录可以作为参考实现。
@@ -51,8 +51,8 @@ argument-hint: >
    生成 `{output_dir}/design/block_level/` 下的 block-level 设计，并同步生成 `{output_dir}/model_new_tilelang.py`。在这一步只确定 block 级任务划分、流水骨架、workspace 与同步关系，具体计算细节先标记为 `TODO(tile-level)`。
    参考文档：`@references/BlockLevelDesign.md`
 2. `Tile 层级设计`
-   在第一步基础上继续生成 `{output_dir}/design/tile_level/`。直接以 block-level 设计为骨架，在 tile-level 中补全各处 `TODO(tile-level)`，完成可执行的 TileLang 设计与实现。
+   在第一步基础上继续生成 `{output_dir}/design/tile_level/`。直接以 block-level 设计为骨架，在 tile-level 中补全各处 `TODO(tile-level)`，完成用于表达设计意图的 TileLang 设计与实现。
    参考文档：`@references/TileLangAscendProgrammingGuide.md`
-3. `TileLang 验证与迭代`
-   调用 `@references/evaluate_tilelang.sh {output_dir}` 验证 TileLang；如果结果不正确，参考 `@references/TileLangDebug.md` 持续迭代修改，直到通过验证。
+3. `TileLang 自检（可选）`
+   如用户明确要求，或为了排查 DSL 语法 / 编译问题，可调用 `@references/evaluate_tilelang.sh {output_dir}` 做辅助检查；但 TileLang 结果当前不作为 correctness gate，也不作为性能测试输入。若遇到框架语义缺陷、尾块处理异常或其他 TileLang 自身 bug，应保留设计表达并在最终说明中明确记录，不要为了通过 TileLang 验证而扭曲设计。
    参考文档：`@references/TileLangDebug.md`

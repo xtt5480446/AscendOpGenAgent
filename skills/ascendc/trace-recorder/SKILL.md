@@ -26,6 +26,10 @@ argument-hint: >
 - Agent 的迭代过程（尝试了什么、失败了几次、最终如何解决）
 - 遇到的错误信息
 
+补充约定：
+- TileLang 当前主要用于设计表达，不默认作为 correctness / performance gate
+- 若未执行 TileLang 验证，或因 TileLang 自身 bug 明确跳过验证，应如实记录为“跳过”并写明原因
+
 ## 输出格式
 
 将以下内容写入 `{output_dir}/trace.md`：
@@ -35,7 +39,7 @@ argument-hint: >
 
 - 时间: {当前日期时间}
 - 算子: {output_dir 对应的算子名}
-- 最终结果: PASS / FAIL (tilelang) | PASS / FAIL (ascendc)
+- 最终结果: SKIP / PASS / FAIL (tilelang) | PASS / FAIL (ascendc)
 
 ## 阶段零: Case 精简
 
@@ -46,7 +50,7 @@ argument-hint: >
 
 ## 阶段一: TileLang
 
-- 结果: 通过 / 失败
+- 结果: 通过 / 失败 / 跳过
 - evaluate_tilelang.sh 执行次数: {n}
 - 关键错误信息: {评测脚本返回的错误，原文引用}
 - Agent 行为记录:
@@ -70,9 +74,9 @@ argument-hint: >
 
 - 结果: {性能数据}
 - performance-analyzer 执行详情:
-  - 测试的实现: {reference/tilelang/ascendc}
-  - 各实现平均耗时: {reference: Xms, tilelang: Yms, ascendc: Zms}
-  - 加速比: {tilelang vs reference: X.x, ascendc vs reference: Y.y}
+  - 测试的实现: {reference/ascendc，若额外测试再包含 tilelang}
+  - 各实现平均耗时: {reference: Xms, ascendc: Zms, tilelang: Yms(如有)}
+  - 加速比: {ascendc vs reference: Y.y, tilelang vs reference: X.x(如有)}
 
 ## 评测输出摘要
 
@@ -85,3 +89,4 @@ argument-hint: >
 2. **行为序列**: 每轮迭代记录 agent 的实际操作（改了什么文件、改了什么逻辑），而非笼统的"修复了 bug"
 3. **走偏分析**: 重点记录 agent 做了哪些最终被证明无效的尝试，这是 meta-agent 优化 harness 的核心输入
 4. **省略成功**: 如果某阶段一次通过且无异常，简要记录即可，不需要展开
+5. **如实跳过**: TileLang 未验证不是异常；如果流程按约定跳过，应明确记录“跳过”及原因，不要误记为失败

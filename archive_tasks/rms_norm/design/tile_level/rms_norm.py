@@ -226,6 +226,7 @@ def rms_norm(M, N, eps=1e-5, dtype="float32"):
                         for row in T.serial(sub_block_M):
                             row_idx = bx * block_M + vid * sub_block_M + row
                             if row_idx < M:
+                                T.tile.fill(out_ub, T.float32(0))
                                 for by in T.serial(n_num):
                                     col_base = by * block_N
                                     valid_n = T.if_then_else(col_base + block_N <= N, block_N, N - col_base)
@@ -235,8 +236,8 @@ def rms_norm(M, N, eps=1e-5, dtype="float32"):
                                     else:
                                         T.copy(X[row_idx:row_idx + 1, col_base:col_base + valid_n], x_ub[:, 0:valid_n])
 
-                                    T.tile.mul(x_sq_ub, x_ub, x_ub)
-                                    T.tile.add(out_ub, out_ub, x_sq_ub)
+                                    T.tile.mul(x_sq_ub[:, 0:valid_n], x_ub[:, 0:valid_n], x_ub[:, 0:valid_n])
+                                    T.tile.add(out_ub[:, 0:valid_n], out_ub[:, 0:valid_n], x_sq_ub[:, 0:valid_n])
 
                                 T.reduce_sum(out_ub, out_ub[:, 0], reduce_tmp, dim=-1)
                                 x_sq_ub[0, 0] = out_ub[0, 0] * inv_n_const + eps_const
@@ -263,8 +264,8 @@ def rms_norm(M, N, eps=1e-5, dtype="float32"):
                                     else:
                                         T.copy(Gamma[col_base:col_base + valid_n], gamma_ub[0, 0:valid_n])
 
-                                    T.tile.mul(out_ub, x_ub, inv_rms)
-                                    T.tile.mul(out_ub, out_ub, gamma_ub)
+                                    T.tile.mul(out_ub[:, 0:valid_n], x_ub[:, 0:valid_n], inv_rms)
+                                    T.tile.mul(out_ub[:, 0:valid_n], out_ub[:, 0:valid_n], gamma_ub[:, 0:valid_n])
 
                                     if need_cast:
                                         T.tile.cast(out_cast_ub, out_ub, mode=out_cast_mode, count=valid_n)
