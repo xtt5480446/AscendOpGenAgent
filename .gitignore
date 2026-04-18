@@ -12,3 +12,5 @@ output*
 build/
 extra-info/
 *.tar
+# 屏蔽 Windows 区域标识文件
+*:Zone.Identifier
