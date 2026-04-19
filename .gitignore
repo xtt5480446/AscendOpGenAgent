@@ -14,3 +14,7 @@ extra-info/
 *.tar
 # 屏蔽 Windows 区域标识文件
 *:Zone.Identifier
+.codex/
+level_5_output/
+level_5_output_v2/
+benchmarks/NPUKernelBench/level5/

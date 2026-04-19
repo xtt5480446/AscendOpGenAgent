@@ -1,5 +1,5 @@
 #!/bin/bash
-# 批量调度 ascendc-coder，支持多 NPU 并行
+# 批量调度 ascendc-coder（codex 模式），支持多 NPU 并行
 #
 # 支持两种模式：
 # 1. 单 NPU 模式（--npu）：串行执行，向后兼容
@@ -7,15 +7,13 @@
 #
 # 用法:
 #   # 单 NPU 模式
-#   bash utils/run_benchmark_ascendc.sh --benchmark-dir /path/to/KernelBench --level 1 --range 41-53 --npu 0 --output /path/to/output
+#   bash utils/run_benchmark_ascendc_with_codex.sh --benchmark-dir /path/to/KernelBench --level 1 --range 41-53 --npu 0 --output /path/to/output
 #
 #   # 多 NPU 并行模式
-#   bash utils/run_benchmark_ascendc.sh --benchmark-dir /path/to/KernelBench --level 1 --range 1-30 --npu-list "0,1,2,3,4,5" --output /path/to/output
+#   bash utils/run_benchmark_ascendc_with_codex.sh --benchmark-dir /path/to/KernelBench --level 1 --range 1-30 --npu-list "0,1,2,3,4,5" --output /path/to/output
 
 # ── 环境变量 ──
-# export ANTHROPIC_AUTH_TOKEN=sk-  # 替换为您的实际令牌
-# export ANTHROPIC_BASE_URL=https://yunwu.ai
-# export API_TIMEOUT_MS=300000  # 设置为 300 秒超时
+# export OPENAI_API_KEY=sk-  # 替换为您的实际令牌
 
 set -euo pipefail
 
@@ -41,7 +39,7 @@ while [[ $# -gt 0 ]]; do
         --output)        OUTPUT_DIR="$2"; shift 2 ;;
         --timeout)       TIMEOUT_SEC="$2"; shift 2 ;;
         -h|--help)
-            echo "用法: bash utils/run_benchmark_ascendc.sh --benchmark-dir <path> --level <N> [--range <start-end> | --ids <id_list>] [--npu <id> | --npu-list <list>] --output <path> [--timeout <seconds>]"
+            echo "用法: bash utils/run_benchmark_ascendc_with_codex.sh --benchmark-dir <path> --level <N> [--range <start-end> | --ids <id_list>] [--npu <id> | --npu-list <list>] --output <path> [--timeout <seconds>]"
             echo ""
             echo "参数:"
             echo "  --benchmark-dir  KernelBench 根目录路径 (必填)"
@@ -55,10 +53,10 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "示例:"
             echo "  # 单 NPU 串行模式"
-            echo "  bash utils/run_benchmark_ascendc.sh --benchmark-dir /path/to/KernelBench --level 1 --range 1-30 --npu 0 --output /path/to/output"
+            echo "  bash utils/run_benchmark_ascendc_with_codex.sh --benchmark-dir /path/to/KernelBench --level 1 --range 1-30 --npu 0 --output /path/to/output"
             echo ""
             echo "  # 多 NPU 并行模式"
-            echo "  bash utils/run_benchmark_ascendc.sh --benchmark-dir /path/to/KernelBench --level 1 --range 1-30 --npu-list \"0,1,2,3,4,5\" --output /path/to/output"
+            echo "  bash utils/run_benchmark_ascendc_with_codex.sh --benchmark-dir /path/to/KernelBench --level 1 --range 1-30 --npu-list \"0,1,2,3,4,5\" --output /path/to/output"
             exit 0
             ;;
         *) echo "未知参数: $1"; exit 1 ;;
@@ -205,22 +203,21 @@ if [[ "$USE_PARALLEL" == true ]]; then
 
                     START_TIME=$(date +%s)
 
-                    PROMPT="使用当前agent生成ascendC算子，npu=${npu}，算子描述文件为 ${file}，输出到 ${TARGET_OP_DIR}/"
+                    PROMPT="执行 AGENT.md 中的完整流程，使用当前agent生成ascendC算子，npu=${npu}，算子描述文件为 ${file}，输出到 ${TARGET_OP_DIR}/"
 
-                    if timeout "$TIMEOUT_SEC" claude -p "$PROMPT" \
-                        --allowedTools 'Bash(*)' 'Read(*)' 'Write(*)' 'Edit(*)' 'Glob(*)' 'Grep(*)' 'Skill(*)' \
+                    if timeout "$TIMEOUT_SEC" codex exec --dangerously-bypass-approvals-and-sandbox "$PROMPT" \
                         >> "${OUTPUT_DIR}/npu_${npu}.log" 2>&1; then
 
                         END_TIME=$(date +%s)
                         ELAPSED=$((END_TIME - START_TIME))
 
                         # 立即输出到主终端
-                        echo "[NPU $npu] ✅ 算子 ${id}: ${filename} 完成 (${ELAPSED}s)" >&2
+                        echo "[NPU $npu]  算子 ${id}: ${filename} 完成 (${ELAPSED}s)" >&2
 
                         # 加锁写入报告
                         {
                             flock -x 200
-                            echo "| ${id} | ${filename} | ✅ 成功 | ${ELAPSED} |" >> "$REPORT_FILE"
+                            echo "| ${id} | ${filename} |  成功 | ${ELAPSED} |" >> "$REPORT_FILE"
                         } 200>"${OUTPUT_DIR}/.lock"
 
                     else
@@ -228,12 +225,12 @@ if [[ "$USE_PARALLEL" == true ]]; then
                         ELAPSED=$((END_TIME - START_TIME))
 
                         # 立即输出到主终端
-                        echo "[NPU $npu] ❌ 算子 ${id}: ${filename} 失败 (${ELAPSED}s)" >&2
+                        echo "[NPU $npu]  算子 ${id}: ${filename} 失败 (${ELAPSED}s)" >&2
 
                         # 加锁写入报告
                         {
                             flock -x 200
-                            echo "| ${id} | ${filename} | ❌ 失败 | ${ELAPSED} |" >> "$REPORT_FILE"
+                            echo "| ${id} | ${filename} |  失败 | ${ELAPSED} |" >> "$REPORT_FILE"
                         } 200>"${OUTPUT_DIR}/.lock"
                     fi
                 done
@@ -277,21 +274,20 @@ else
 
         START_TIME=$(date +%s)
 
-        PROMPT="使用当前agent生成ascendC算子，npu=${NPU_ID}，算子描述文件为 ${file}，输出到 ${TARGET_OP_DIR}/"
+        PROMPT="执行 AGENT.md 中的完整流程，使用当前agent生成ascendC算子，npu=${NPU_ID}，算子描述文件为 ${file}，输出到 ${TARGET_OP_DIR}/"
 
-        if timeout "$TIMEOUT_SEC" claude -p "$PROMPT" \
-            --allowedTools 'Bash(*)' 'Read(*)' 'Write(*)' 'Edit(*)' 'Glob(*)' 'Grep(*)' 'Skill(*)'; then
+        if timeout "$TIMEOUT_SEC" codex exec --dangerously-bypass-approvals-and-sandbox "$PROMPT"; then
             END_TIME=$(date +%s)
             ELAPSED=$((END_TIME - START_TIME))
-            echo "| ${id} | ${filename} | ✅ 成功 | ${ELAPSED} |" >> "$REPORT_FILE"
+            echo "| ${id} | ${filename} |  成功 | ${ELAPSED} |" >> "$REPORT_FILE"
             SUCCESS=$((SUCCESS + 1))
-            echo "[${CURRENT}/${TOTAL}] ✅ 算子 ${id} 完成 (${ELAPSED}s)"
+            echo "[${CURRENT}/${TOTAL}]  算子 ${id} 完成 (${ELAPSED}s)"
         else
             END_TIME=$(date +%s)
             ELAPSED=$((END_TIME - START_TIME))
-            echo "| ${id} | ${filename} | ❌ 失败 | ${ELAPSED} |" >> "$REPORT_FILE"
+            echo "| ${id} | ${filename} |  失败 | ${ELAPSED} |" >> "$REPORT_FILE"
             FAIL=$((FAIL + 1))
-            echo "[${CURRENT}/${TOTAL}] ❌ 算子 ${id} 失败 (${ELAPSED}s)"
+            echo "[${CURRENT}/${TOTAL}]  算子 ${id} 失败 (${ELAPSED}s)"
         fi
     done
 fi
@@ -302,8 +298,8 @@ echo "## 汇总" >> "$REPORT_FILE"
 echo "" >> "$REPORT_FILE"
 
 # 统计成功和失败数
-SUCCESS=$(grep -c "✅ 成功" "$REPORT_FILE" 2>/dev/null || echo 0)
-FAIL=$(grep -c "❌ 失败" "$REPORT_FILE" 2>/dev/null || echo 0)
+SUCCESS=$(grep -c " 成功" "$REPORT_FILE" 2>/dev/null || echo 0)
+FAIL=$(grep -c " 失败" "$REPORT_FILE" 2>/dev/null || echo 0)
 
 echo "- 总数: ${TOTAL}" >> "$REPORT_FILE"
 echo "- 成功: ${SUCCESS}" >> "$REPORT_FILE"
@@ -322,7 +318,7 @@ fi
 echo "================================================================"
 
 # ==================================================================
-# 🚀 新增：调用外部 Python 汇总脚本
+#  新增：调用外部 Python 汇总脚本
 # ==================================================================
 echo ""
 echo "================================================================"
