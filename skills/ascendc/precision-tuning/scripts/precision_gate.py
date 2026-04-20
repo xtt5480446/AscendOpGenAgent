@@ -27,6 +27,9 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
+_SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = _SCRIPT_DIR.parent.parent.parent   # AscendOpGenAgent/
 
 
 MAX_ATTEMPTS = 2
@@ -35,11 +38,11 @@ MAX_STAGNANT_ROUNDS = 2
 
 class GateChecker:
 
-    def __init__(self, op_name: str, output_path: str, attempt: int = 0):
+    def __init__(self, op_name: str, task_dir: str, attempt: int = 0):
         self.op_name = op_name
-        self.output_path = output_path
+        self.task_dir = task_dir
         self.attempt = attempt
-        self.tuning_dir = os.path.join(output_path, "precision_tuning")
+        self.tuning_dir = os.path.join(task_dir, "precision_tuning")
 
     # ================================================================
     # Gate-F: 取证报告 (无前置依赖)
@@ -189,7 +192,7 @@ class GateChecker:
     # ================================================================
 
     def check_fix(self) -> dict:
-        # 链式前置检查: audit 必须存在
+        """Gate-X: 验证代码文件完整性（修复后调用）。"""
         prereq = self._check_prerequisite_audit()
         if not prereq["satisfied"]:
             checks = {"prerequisite_audit": False}
@@ -198,21 +201,33 @@ class GateChecker:
             result["prerequisite_error"] = prereq["reason"]
             return result
 
-        project_dir = self._find_project_dir()
+        kdir = self._kernel_dir()
+        pybind_path = os.path.join(kdir, "pybind11.cpp") if kdir else None
+        has_pybind = kdir is not None and os.path.exists(pybind_path)
+        has_module_macro = False
+        has_non_pybind_cpp = False
+        import_name_ok = False
+
+        if has_pybind:
+            content = open(pybind_path).read()
+            has_module_macro = "PYBIND11_MODULE" in content
+            has_non_pybind_cpp = any(
+                f.endswith(".cpp") and f != "pybind11.cpp"
+                for f in os.listdir(kdir)
+            )
+            import_name_ok = self._check_import_name_match()
+
         checks = {
             "prerequisite_audit": True,
-            "project_dir_exists": project_dir is not None,
-            "kernel_exists": False,
-            "kernel_nonempty": False,
-            "host_exists": False,
+            "kernel_dir_exists": kdir is not None,
+            "pybind11_cpp_exists": has_pybind,
+            "pybind11_has_module_macro": has_module_macro,
+            "has_non_pybind_cpp": has_non_pybind_cpp,
+            "model_new_ascendc_exists": os.path.exists(
+                os.path.join(self.task_dir, "model_new_ascendc.py")
+            ),
+            "import_name_consistent": import_name_ok,
         }
-        if project_dir:
-            kp = os.path.join(project_dir, "op_kernel", f"{self.op_name.lower()}_custom.cpp")
-            hp = os.path.join(project_dir, "op_host", f"{self.op_name.lower()}_custom.cpp")
-            checks["kernel_exists"] = os.path.exists(kp)
-            if checks["kernel_exists"]:
-                checks["kernel_nonempty"] = os.path.getsize(kp) > 100
-            checks["host_exists"] = os.path.exists(hp)
         return self._result("GATE-X", checks)
 
     # ================================================================
@@ -311,17 +326,17 @@ class GateChecker:
         return {"satisfied": True, "reason": "", "detail": {}}
 
     def _check_prerequisite_code(self) -> dict:
-        """检查代码文件存在"""
-        project_dir = self._find_project_dir()
-        if not project_dir:
+        """检查 kernel/pybind11.cpp 存在且非空。"""
+        kdir = self._kernel_dir()
+        if not kdir:
             return {"satisfied": False,
-                    "reason": "找不到项目目录",
-                    "detail": {"project_exists": False}}
-        kp = os.path.join(project_dir, "op_kernel", f"{self.op_name.lower()}_custom.cpp")
-        if not os.path.exists(kp) or os.path.getsize(kp) < 100:
+                    "reason": f"{self.task_dir}/kernel/ 不存在",
+                    "detail": {"kernel_dir_exists": False}}
+        pybind = os.path.join(kdir, "pybind11.cpp")
+        if not os.path.exists(pybind) or os.path.getsize(pybind) < 100:
             return {"satisfied": False,
-                    "reason": f"{kp} 不存在或为空, 必须先完成代码修复 (Step 3)",
-                    "detail": {"kernel_exists": False}}
+                    "reason": f"{pybind} 不存在或内容过少",
+                    "detail": {"pybind11_cpp_exists": False}}
         return {"satisfied": True, "reason": "", "detail": {}}
 
     # ================================================================
@@ -976,19 +991,28 @@ class GateChecker:
     # 工具
     # ================================================================
 
-    def _find_project_dir(self) -> str | None:
-        pascal = "".join(w.capitalize() for w in self.op_name.split("_")) + "Custom"
-        c = os.path.join(self.output_path, pascal)
-        if os.path.isdir(c):
-            return c
-        try:
-            for item in os.listdir(self.output_path):
-                full = os.path.join(self.output_path, item)
-                if item.endswith("Custom") and os.path.isdir(full):
-                    return full
-        except FileNotFoundError:
-            pass
-        return None
+    def _kernel_dir(self) -> str | None:
+        """返回 {task_dir}/kernel/ 路径，不存在则返回 None。"""
+        kdir = os.path.join(self.task_dir, "kernel")
+        return kdir if os.path.isdir(kdir) else None
+
+    def _check_import_name_match(self) -> bool:
+        """比对 model_new_ascendc.py 的 import _xxx_ext 名与 pybind11.cpp 的 PYBIND11_MODULE 名。"""
+        wrapper = os.path.join(self.task_dir, "model_new_ascendc.py")
+        pybind  = os.path.join(self.task_dir, "kernel", "pybind11.cpp")
+        if not os.path.exists(wrapper) or not os.path.exists(pybind):
+            return False
+        wrapper_text = open(wrapper).read()
+        import_m = re.search(r"import\s+(_\w+)", wrapper_text)
+        if not import_m:
+            return False
+        import_name = import_m.group(1)
+        pybind_text = open(pybind).read()
+        module_m = re.search(r"PYBIND11_MODULE\s*\(\s*(\w+)\s*,", pybind_text)
+        if not module_m:
+            return False
+        module_name = "_" + module_m.group(1)
+        return import_name == module_name
 
     def _result(self, gate_name: str, checks: dict) -> dict:
         return {"gate": gate_name, "passed": all(checks.values()), "checks": checks}
@@ -1003,11 +1027,13 @@ def main():
     parser.add_argument("--step", required=True,
                         choices=["forensics", "audit", "fix", "validate"])
     parser.add_argument("--op-name", required=True)
-    parser.add_argument("--output-path", required=True)
+    parser.add_argument("--task-name", required=True, help="task 目录名")
+    parser.add_argument("--task-dir", default=None, help="task 绝对路径，默认 {REPO_ROOT}/{task_name}")
     parser.add_argument("--attempt", type=int, default=0)
     args = parser.parse_args()
 
-    ck = GateChecker(args.op_name, args.output_path, args.attempt)
+    task_dir = args.task_dir or str(REPO_ROOT / args.task_name)
+    ck = GateChecker(args.op_name, task_dir, args.attempt)
     dispatch = {
         "forensics": ck.check_forensics,
         "audit": ck.check_audit,
