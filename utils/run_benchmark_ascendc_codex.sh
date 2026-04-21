@@ -41,8 +41,19 @@ PROMPT_TEMPLATE='严格按照 /home/c00959374/AscendOpGenAgent/agents/ascend-ker
 4. Phase 1 先将 __FILE__ 复制到 __TARGET__/ 作为工作基准
 5. NPU 设备已通过环境变量 ASCEND_RT_VISIBLE_DEVICES=__NPU__ 暴露，生成的 Python / 验证脚本应直接使用该环境变量，不要自行覆盖
 6. 产物至少包括: __TARGET__/model_new_tilelang.py 和 __TARGET__/model_new_ascendc.py，以及 agent 规范中列出的各 Phase 输出
-7. 全程不要向用户询问或等待交互；遇到分支/决策均按 agent 规范定义的默认路径处理
-8. 结束时在 __TARGET__/ 输出一份简短的 trace/final 报告（Phase 7），说明各阶段成功/失败与最终产物清单'
+7. 【反作弊硬约束】核心计算必须在 AscendC kernel 内完成，严禁以下任何"绕过 kernel"行为：
+   (a) Python wrapper (model_new_ascendc.py) 的 forward() 中调用 torch.* / F.* 计算算子，或用 tensor 计算方法 (x.sum/x.matmul/x.cumsum 等)；
+   (b) kernel/*.cpp 或 *.h 中调用 at::<算子>(...) 或 torch::<算子>(...) 这类 libtorch 计算 API；
+   (c) kernel/ 中使用 tensor 计算方法 (如 x.cumsum() / x.histc() / .sum() / .matmul()) 绕过 AscendC 实现；
+   (d) #include <ATen/ops/*.h> 引入 ATen 算子头文件；
+   (e) 仅写一个"空壳 __global__ __aicore__ 函数"但 pybind 层直接返回 at::xxx/x.xxx() 结果；
+   只允许在 pybind11.cpp 里用 at::empty / at::empty_like / at::zeros 这类 allocator 和 TensorOptions 构造 (at::device(...)/at::dtype(...))，
+   且必须通过 <<<...>>> 或 aclrtLaunchKernel / *_do() stub launcher 真正触发 AscendC kernel 计算。
+   生成结束后 bench 会自动调用 anticheat.py verify 做 AST + C++ 源码双重扫描，命中即在报告标 🚨 CHEAT (不重跑, 但会记录违规点)。
+8. 全程不要向用户询问或等待交互；遇到分支/决策均按 agent 规范定义的默认路径处理
+9. 结束时在 __TARGET__/ 输出一份简短的 trace/final 报告（Phase 7），说明各阶段成功/失败与最终产物清单'
+
+ANTICHEAT_SCRIPT="skills/ascendc/precision-tuning/scripts/anticheat.py"
 
 # ── 参数解析 ──
 while [[ $# -gt 0 ]]; do
@@ -202,15 +213,44 @@ run_worker() {
 
         end=$(date +%s); elapsed=$((end - start))
 
+        # 反作弊后置检测：AST + C++ 源码扫描（生成场景无 baseline, 纯检测）
+        local cheat_json cheat_verdict cheat_reasons cheat_mark
+        cheat_json=$(docker exec "$container" bash -lc "
+            cd '$WORKDIR_IN_CONTAINER'
+            python3 '$ANTICHEAT_SCRIPT' verify '$target_dir' --json 2>/dev/null
+        " 2>/dev/null || true)
+        cheat_verdict=$(echo "$cheat_json" | python3 -c "
+import sys, json
+try:
+    print(json.loads(sys.stdin.read()).get('verdict', 'UNKNOWN'))
+except Exception:
+    print('UNKNOWN')
+" 2>/dev/null || echo "UNKNOWN")
+        cheat_reasons=$(echo "$cheat_json" | python3 -c "
+import sys, json
+try:
+    print(';'.join(json.loads(sys.stdin.read()).get('reasons', [])))
+except Exception:
+    print('')
+" 2>/dev/null || echo "")
+        # 保存详细结果供事后审查
+        [[ -n "$cheat_json" ]] && echo "$cheat_json" > "$target_dir/_anticheat.json"
+
+        cheat_mark=""
+        if [[ "$cheat_verdict" == "CHEAT" ]]; then
+            cheat_mark=" / 🚨 CHEAT"
+            echo "[${container}@npu${npu}] 🚨 id=$id ${filename} CHEAT: $cheat_reasons"
+        fi
+
         local row icon
         if [[ $status -eq 0 ]]; then
-            icon="✅ 成功"
+            icon="✅ 成功${cheat_mark}"
             echo "[${container}@npu${npu}] ✅ id=$id ${filename} (${elapsed}s)"
         elif [[ $status -eq 124 ]]; then
-            icon="⏱ 超时"
+            icon="⏱ 超时${cheat_mark}"
             echo "[${container}@npu${npu}] ⏱ id=$id ${filename} TIMEOUT (${elapsed}s)"
         else
-            icon="❌ 失败(rc=$status)"
+            icon="❌ 失败(rc=$status)${cheat_mark}"
             echo "[${container}@npu${npu}] ❌ id=$id ${filename} rc=$status (${elapsed}s)"
         fi
         row="| $id | $filename | $icon | $elapsed | ${container}@npu${npu} |"
@@ -238,6 +278,7 @@ for p in "${pids[@]}"; do wait "$p" || true; done
 SUCCESS=$(grep -c "✅ 成功" "$REPORT" || echo 0)
 TIMEOUT_CNT=$(grep -c "⏱ 超时" "$REPORT" || echo 0)
 FAIL=$(grep -c "❌ 失败" "$REPORT" || echo 0)
+CHEAT=$(grep -c "🚨 CHEAT" "$REPORT" || echo 0)
 
 {
     echo
@@ -247,11 +288,12 @@ FAIL=$(grep -c "❌ 失败" "$REPORT" || echo 0)
     echo "- 成功: $SUCCESS"
     echo "- 超时: $TIMEOUT_CNT"
     echo "- 失败: $FAIL"
+    echo "- 作弊 (🚨 CHEAT, 与成功/失败正交，不重跑): $CHEAT"
     echo "- 结束: $(date '+%F %T')"
 } >> "$REPORT"
 
 echo "================================================================"
-echo "完成: ✅$SUCCESS  ⏱$TIMEOUT_CNT  ❌$FAIL  /  共 $TOTAL"
+echo "完成: ✅$SUCCESS  ⏱$TIMEOUT_CNT  ❌$FAIL  🚨$CHEAT  /  共 $TOTAL"
 echo "报告: $REPORT"
 echo "每 worker 日志: $OUTPUT_DIR/worker_<container>.log"
 echo "================================================================"

@@ -66,6 +66,27 @@ Phase 7: Trace 记录         (trace-recorder)
 - 只允许修改或新增 `{output_dir}/` 目录中的文件，不要改动其他目录中的文件。
 - 只允许读取当前工作区目录结构内的文件与子目录；禁止读取当前工作区之外的任何路径，包括父目录、兄弟目录、用户目录、绝对路径以及系统其他目录。
 - archive_tasks目录是历史成功任务，可作为参考实现
+
+### C++ 层反作弊红线（kernel/*.cpp 与 *.h）
+
+核心计算必须真正在 AscendC kernel 内完成。**严禁以下任一"绕过 kernel"行为**：
+
+| 禁止模式 | 示例（均会被反作弊脚本捕获） |
+|---------|----------|
+| 调用 `at::<算子>(...)` 类 libtorch 计算 API | `at::histc(x, bins, min, max)`、`at::cumsum(x, dim)`、`at::sum(x)`、`at::matmul(a, b)` |
+| 调用 `torch::<算子>(...)` 计算 API | `torch::sigmoid(x)`、`torch::relu(x)` |
+| 调用 tensor 计算方法 | `x.cumsum(dim)`、`x.sum()`、`x.matmul(y)`、`x.histc(...)`、`.softmax(...)` |
+| `#include <ATen/ops/<op>.h>` 引入 ATen 算子头文件 | `#include <ATen/ops/histc.h>`、`#include <ATen/ops/cumsum.h>` |
+| 写一个空壳 `__global__ __aicore__` kernel（仅含 `KERNEL_TASK_TYPE_DEFAULT`）充数，实际由 pybind 层直接返回 `at::xxx` / `x.xxx()` 结果 | 任何 kernel body 只有宏声明、没有 UB/GM 读写和计算原语的"作弊 stub" |
+
+**允许的 `at::` / `torch::` 调用**（仅限 allocator 和 TensorOptions 构造）：
+- allocator：`at::empty`、`at::empty_like`、`at::zeros`、`at::zeros_like`、`at::ones`、`at::ones_like`、`at::full`、`at::full_like`、`at::from_blob`
+- TensorOptions 构造：`at::device(at::kCPU/kNPU)`、`at::dtype(at::kFloat)`、`at::scalar_type(...)` 等链式 builder
+- 断言：`TORCH_CHECK(...)`
+
+**必须存在的正向信号**：pybind11.cpp 或 host 文件里至少有一处 `<<<...>>>` triple-chevron kernel launch、`aclrtLaunchKernel(...)` 或 `*_do(...)` stub launcher，**否则判 `NO_KERNEL_LAUNCH`**。
+
+**检测时机**：每次生成 / 修改 `kernel/*.cpp` 或 `model_new_ascendc.py` 后，bench 会自动跑 `skills/ascendc/precision-tuning/scripts/anticheat.py verify`，命中即在批量报告标 🚨 CHEAT 并保留 `_anticheat.json` 供审查。**作弊任务不会自动重跑，但会进入人工审查队列**。如果你因平台/API 限制无法实现某算子，请在 Phase 7 trace.md 中如实记录失败原因，不要用 ATen fallback 掩盖。
 ---
 
 ## Phase 0: 参数确认
