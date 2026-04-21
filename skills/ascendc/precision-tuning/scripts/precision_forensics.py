@@ -587,6 +587,104 @@ class MemoryLayoutAnalyzer:
 
 
 # ============================================================
+# Output 扁平化 (对齐 utils/verification_ascendc.py::_compare_values 的 path 约定)
+# ============================================================
+#
+# verification_ascendc.py 的 _compare_values 递归处理任意
+# Tensor | list | tuple | dict | scalar 结构, path 语法：
+#   - "output[0]"         : 顶层 tensor / 列表索引
+#   - "output[1].foo"     : dict key
+#   - "output[0][2]"      : 嵌套 list/tuple 索引
+#
+# OutputFlattener.flatten(ref, cand, root="output") 把 (ref, cand) 这两棵
+# 同形状的嵌套树展开成 {path_str: {ref, cand, kind, shape, dtype, status}}。
+#
+# status 值：
+#   - "ok"              : 结构/类型匹配，可进 DiffAnalyzer
+#   - "type_mismatch"   : ref/cand 类型不同
+#   - "shape_mismatch"  : tensor shape 不同
+#   - "len_mismatch"    : list/tuple 长度不同
+#   - "key_mismatch"    : dict key 集合不同
+#
+# kind 值："tensor" | "scalar" | "none"
+#
+# 若 status != "ok"，DiffAnalyzer 不应被调用（caller 要先检查）。
+
+class OutputFlattener:
+
+    def flatten(self, ref, cand, root: str = "output") -> dict:
+        out: dict = {}
+        self._walk(ref, cand, root, out)
+        return out
+
+    def _walk(self, ref, cand, path: str, out: dict) -> None:
+        # --- type mismatch 顶层优先判定 ---
+        if type(ref) is not type(cand):
+            # 除了 list/tuple 互通这种 Python 内置差异，其他都视作 type_mismatch
+            if not (isinstance(ref, (list, tuple)) and isinstance(cand, (list, tuple))
+                    and type(ref) is type(cand)):
+                out[path] = {
+                    "ref": ref, "cand": cand, "kind": "none", "shape": None,
+                    "dtype": None, "status": "type_mismatch",
+                }
+                return
+
+        # --- Tensor ---
+        if isinstance(ref, torch.Tensor):
+            shape = list(ref.shape)
+            dtype = str(ref.dtype)
+            if ref.shape != cand.shape:
+                out[path] = {
+                    "ref": ref, "cand": cand, "kind": "tensor", "shape": shape,
+                    "dtype": dtype, "status": "shape_mismatch",
+                }
+                return
+            out[path] = {
+                "ref": ref, "cand": cand, "kind": "tensor", "shape": shape,
+                "dtype": dtype, "status": "ok",
+            }
+            return
+
+        # --- list / tuple ---
+        if isinstance(ref, (list, tuple)):
+            if len(ref) != len(cand):
+                out[path] = {
+                    "ref": ref, "cand": cand, "kind": "none", "shape": None,
+                    "dtype": None, "status": "len_mismatch",
+                }
+                return
+            for i, (r, c) in enumerate(zip(ref, cand)):
+                self._walk(r, c, f"{path}[{i}]", out)
+            return
+
+        # --- dict ---
+        if isinstance(ref, dict):
+            if set(ref.keys()) != set(cand.keys()):
+                out[path] = {
+                    "ref": ref, "cand": cand, "kind": "none", "shape": None,
+                    "dtype": None, "status": "key_mismatch",
+                }
+                return
+            for k in ref:
+                self._walk(ref[k], cand[k], f"{path}.{k}", out)
+            return
+
+        # --- None ---
+        if ref is None:
+            out[path] = {
+                "ref": None, "cand": None, "kind": "none", "shape": None,
+                "dtype": None, "status": "ok",
+            }
+            return
+
+        # --- scalar ---
+        out[path] = {
+            "ref": ref, "cand": cand, "kind": "scalar", "shape": None,
+            "dtype": type(ref).__name__, "status": "ok",
+        }
+
+
+# ============================================================
 # 主入口
 # ============================================================
 
