@@ -1,0 +1,8 @@
+{"inputs": [{"name": "tensors", "type": "tensor_list", "required": true, "dtype": "float32", "shapes": [[4, 16], [4, 16]]}, {"name": "concat_dim", "type": "attr", "required": true, "dtype": "int", "value": 1}]}
+{"inputs": [{"name": "tensors", "type": "tensor_list", "required": true, "dtype": "float16", "shapes": [[2, 8, 32], [2, 8, 32], [2, 8, 32]]}, {"name": "concat_dim", "type": "attr", "required": true, "dtype": "int", "value": 0}]}
+{"inputs": [{"name": "tensors", "type": "tensor_list", "required": true, "dtype": "bfloat16", "shapes": [[1, 64, 64], [1, 64, 64]]}, {"name": "concat_dim", "type": "attr", "required": true, "dtype": "int", "value": 2}]}
+{"inputs": [{"name": "tensors", "type": "tensor_list", "required": true, "dtype": "int32", "shapes": [[8, 16], [8, 16], [8, 16]]}, {"name": "concat_dim", "type": "attr", "required": true, "dtype": "int", "value": 1}]}
+{"inputs": [{"name": "tensors", "type": "tensor_list", "required": true, "dtype": "float32", "shapes": [[16, 32, 64]]}, {"name": "concat_dim", "type": "attr", "required": true, "dtype": "int", "value": 0}]}
+{"inputs": [{"name": "tensors", "type": "tensor_list", "required": true, "dtype": "bool", "shapes": [[2, 4, 8, 16], [2, 4, 8, 16]]}, {"name": "concat_dim", "type": "attr", "required": true, "dtype": "int", "value": 3}]}
+{"inputs": [{"name": "tensors", "type": "tensor_list", "required": true, "dtype": "int64", "shapes": [[32, 64], [32, 64]]}, {"name": "concat_dim", "type": "attr", "required": true, "dtype": "int", "value": 0}]}
+{"inputs": [{"name": "tensors", "type": "tensor_list", "required": true, "dtype": "float16", "shapes": [[1, 3, 224, 224], [1, 3, 224, 224]]}, {"name": "concat_dim", "type": "attr", "required": true, "dtype": "int", "value": 0}]}
