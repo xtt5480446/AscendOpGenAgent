@@ -838,101 +838,102 @@ class PrecisionForensics:
         os.makedirs(self.tuning_dir, exist_ok=True)
 
     def run(self) -> dict:
+        executor = OperatorExecutor(self.op_name, self.task_dir, self.attempt)
+        dump_dir = None
         try:
             op_type_info = OperatorTypeDetector().detect(self.op_name, self.task_dir)
-            data = OperatorExecutor(self.op_name, self.task_dir).load_and_execute()
+            data = executor.load_and_execute()
+            cases = data["cases"]
+            metadata = data["metadata"]
+            dump_dir = data["dump_dir"]
+            num_cases = len(cases)
 
-            comparisons = data["comparisons"]
-            by_output: dict = defaultdict(list)
-            for c in comparisons:
-                by_output[c["output_idx"]].append(c)
+            analyzer = DiffAnalyzer(op_type_info=op_type_info)
+            layout = MemoryLayoutAnalyzer()
+            flattener = OutputFlattener()
+
+            # Flatten each case → {path: {ref, cand, kind, shape, dtype, status}}
+            per_case_flat = [
+                flattener.flatten(c["ref"], c["cand"], root="output") for c in cases
+            ]
+            all_paths = sorted(set().union(*[set(p.keys()) for p in per_case_flat])) \
+                if per_case_flat else []
 
             output_reports = []
-            for output_idx in sorted(by_output.keys()):
-                comps = by_output[output_idx]
-                n_fail = sum(1 for c in comps if not c["ok"])
-                max_mismatch_pct = max(
-                    (c.get("mismatch_ratio", 0) for c in comps), default=0.0
-                )
-                max_diff = max(
-                    (c.get("max_abs_diff", 0.0) for c in comps), default=0.0
-                )
-                mean_diff = (
-                    sum(c.get("mean_abs_diff", 0.0) for c in comps) / max(len(comps), 1)
-                )
-                mismatch_frac = max_mismatch_pct / 100.0
-                match_rate = 1.0 - mismatch_frac
+            int8_any = False
+            nan_inf_agg = self._init_nan_inf_agg()
 
-                pattern = self._classify_pattern(mismatch_frac, max_diff)
-                basic_stats = {
-                    "max_abs_diff": max_diff,
-                    "mean_abs_diff": mean_diff,
-                    "median_abs_diff": None,
-                    "p99_abs_diff": None,
-                    "num_mismatched": n_fail,
-                    "total_elements": len(comps),
-                    "mismatch_ratio": mismatch_frac,
-                    "match_rate": match_rate,
-                }
+            for output_index, path in enumerate(all_paths):
+                per_case_diffs = self._analyze_path_across_cases(
+                    path, per_case_flat, cases, analyzer
+                )
+                if not per_case_diffs:
+                    continue  # all cases had non-ok status at this path — skip
+                for pcd in per_case_diffs:
+                    if pcd.get("_int8"):
+                        int8_any = True
+                    self._accumulate_nan_inf(nan_inf_agg, pcd)
+
+                rep_idx = self._pick_representative(per_case_diffs)
+                rep = per_case_diffs[rep_idx]
+                agg = self._compute_case_aggregate(per_case_diffs, cases)
+                first_pcp = next(
+                    (p[path] for p in per_case_flat if path in p), {}
+                )
                 output_reports.append({
-                    "pass_fail": n_fail == 0,
-                    "basic_stats": basic_stats,
-                    "error_distribution": None,
-                    "value_range": None,
-                    "pattern_hint": {
-                        "primary_hint": pattern,
-                        "primary_confidence": 0.5,
-                        "primary_evidence": (
-                            f"mismatch_ratio={max_mismatch_pct:.4f}%, "
-                            f"max_abs_diff={max_diff}"
-                        ),
-                        "all_hints": [{
-                            "pattern": pattern,
-                            "confidence": 0.5,
-                            "evidence": "parsed from verification_ascendc stdout",
-                        }],
-                    },
-                    "worst_elements": [],
-                    "tail_analysis": {},
-                    "dimension_analysis": [],
+                    "output_index": output_index,
+                    "output_path": path,
+                    "output_kind": first_pcp.get("kind", "unknown"),
+                    "output_shape": first_pcp.get("shape"),
+                    "output_dtype": first_pcp.get("dtype"),
+                    "pass_fail": all(
+                        d["basic_stats"]["num_mismatched"] == 0 for d in per_case_diffs
+                    ),
+                    # pattern_hint & diagnostic fields come from representative case
+                    "basic_stats": rep["basic_stats"],
+                    "error_distribution": rep["error_distribution"],
+                    "value_range": rep["value_range"],
+                    "pattern_hint": rep["pattern_hint"],
+                    "worst_elements": rep["worst_elements"],
+                    "tail_analysis": rep["tail_analysis"],
+                    "dimension_analysis": rep["dimension_analysis"],
                     "L5_intermediate": None,
                     "L7_code_mapping": None,
                     "L8_op_type": op_type_info.get("op_type", "unknown"),
-                    "output_index": output_idx,
-                    "output_shape": None,
-                    "output_dtype": comps[0].get("dtype") if comps else None,
+                    # cross-case payload (codex HIGH: do NOT discard non-worst cases)
+                    "per_case": [self._strip_private_keys(d) for d in per_case_diffs],
+                    "representative_case_idx": per_case_diffs[rep_idx]["case_idx"],
+                    "case_aggregate": agg,
                 })
 
+            # Fallback: if no tensor outputs were analyzable, produce a
+            # synthetic pass/fail report from metadata to keep Gate-F schema happy.
             if not output_reports:
-                mismatch_frac = 0.0 if data["all_passed"] else 1.0
-                output_reports.append({
-                    "pass_fail": data["all_passed"],
-                    "basic_stats": {
-                        "max_abs_diff": 0.0, "mean_abs_diff": 0.0,
-                        "median_abs_diff": None, "p99_abs_diff": None,
-                        "num_mismatched": 0, "total_elements": 0,
-                        "mismatch_ratio": mismatch_frac,
-                        "match_rate": 1.0 - mismatch_frac,
-                    },
-                    "error_distribution": None, "value_range": None,
-                    "pattern_hint": {
-                        "primary_hint": "pass" if data["all_passed"] else "unknown",
-                        "primary_confidence": 1.0 if data["all_passed"] else 0.1,
-                        "primary_evidence": (
-                            "all cases passed"
-                            if data["all_passed"]
-                            else "verification failed (no parsed output)"
-                        ),
-                        "all_hints": [],
-                    },
-                    "worst_elements": [], "tail_analysis": {}, "dimension_analysis": [],
-                    "L5_intermediate": None, "L7_code_mapping": None,
-                    "L8_op_type": op_type_info.get("op_type", "unknown"),
-                    "output_index": 0, "output_shape": None, "output_dtype": None,
-                })
+                output_reports.append(self._synthetic_report(cases, metadata, op_type_info))
 
-            worst = max(output_reports, key=lambda r: r["basic_stats"]["mismatch_ratio"])
-            ph = worst["pattern_hint"]
+            # primary_hint from worst output (codex HIGH修订)
+            worst_output = max(
+                output_reports,
+                key=lambda o: (
+                    (o.get("case_aggregate") or {}).get("mismatch_ratio_max",
+                        o["basic_stats"]["mismatch_ratio"]),
+                    (o.get("case_aggregate") or {}).get("max_abs_diff_max",
+                        o["basic_stats"]["max_abs_diff"]),
+                ),
+            )
+            ph = worst_output["pattern_hint"]
+
+            # Top-level L6_memory_layout.inputs: layout of representative case's inputs
+            if cases:
+                rep_case_inputs = cases[worst_output.get(
+                    "representative_case_idx", 0)]["inputs"] \
+                    if isinstance(worst_output.get("representative_case_idx"), int) \
+                    else cases[0]["inputs"]
+                inputs_layout = self._extract_input_tensors_for_layout(rep_case_inputs)
+                inputs_layout_report = layout.analyze_tensors(inputs_layout, "input")
+            else:
+                inputs_layout_report = []
+
             comparator = HistoryComparator(self.tuning_dir, self.attempt)
 
             final = {
@@ -941,28 +942,32 @@ class PrecisionForensics:
                 "attempt": self.attempt,
                 "status": "completed",
                 "num_outputs": len(output_reports),
-                "L0_pass": data["all_passed"],
+                "L0_pass": all(o["pass_fail"] for o in output_reports),
+                "all_passed": all(o["pass_fail"] for o in output_reports),
                 "outputs": output_reports,
                 "L5_intermediate": None,
                 "L6_memory_layout": {
-                    "inputs": data.get("inputs_meta", []),
-                    "outputs": [],
+                    "inputs": inputs_layout_report,
+                    "outputs": [],   # per-output shape lives in outputs[i].output_shape
                 },
                 "L7_code_mapping": None,
                 "L8_operator": op_type_info,
                 "primary_hint": ph["primary_hint"],
                 "primary_confidence": ph["primary_confidence"],
                 "primary_evidence": ph["primary_evidence"],
-                "all_hints": ph["all_hints"],
+                "all_hints": ph.get("all_hints", []),
                 "history_trend": None,
                 "multi_case_analysis": None,
-                "num_test_cases": max(len(by_output), 1),
+                "num_test_cases": num_cases,
                 "available_files": {
                     "reference": os.path.exists(os.path.join(self.task_dir, "model.py")),
                     "custom": os.path.exists(
                         os.path.join(self.task_dir, "model_new_ascendc.py")
                     ),
                 },
+                "int8_path_active": int8_any,
+                "nan_inf_detected": nan_inf_agg,
+                "executor_parity_hash": metadata.get("loader_parity_hash"),
             }
 
             trend = comparator.build_trend(final)
@@ -975,21 +980,21 @@ class PrecisionForensics:
             with open(report_path, "w") as f:
                 json.dump(final, f, indent=2, ensure_ascii=False)
 
-            stats = worst["basic_stats"]
+            stats = worst_output["basic_stats"]
             print(f"[FORENSICS] ✅ 精度取证完成 (attempt={self.attempt})")
-            print(f"  op_type: {op_type_info['op_type']} (source={op_type_info['source']})")
-            print(
-                f"  primary_hint: {final['primary_hint']} "
-                f"(confidence={final['primary_confidence']:.2f})"
-            )
+            print(f"  op_type: {op_type_info['op_type']} "
+                  f"(source={op_type_info.get('source')})")
+            print(f"  primary_hint: {final['primary_hint']} "
+                  f"(confidence={final['primary_confidence']:.2f})")
             print(f"  evidence: {final['primary_evidence']}")
-            print(
-                f"  mismatch: {stats['mismatch_ratio']:.2%} "
-                f"({stats['num_mismatched']}/{stats['total_elements']})"
-            )
+            print(f"  mismatch: {stats['mismatch_ratio']:.2%} "
+                  f"({stats['num_mismatched']}/{stats['total_elements']})")
             print(f"  max_diff: {stats['max_abs_diff']:.6f}")
+            print(f"  num_outputs: {final['num_outputs']}, "
+                  f"num_cases: {num_cases}, "
+                  f"int8_active: {int8_any}")
             if trend:
-                print(f"  趋势: {'↓ 改善中' if trend['mismatch_improving'] else '↑ 未改善'}")
+                print(f"  趋势: {'↓ 改善中' if trend.get('mismatch_improving') else '↑ 未改善'}")
             print(f"  report: {report_path}")
             return final
 
@@ -997,23 +1002,229 @@ class PrecisionForensics:
             err = {
                 "version": "2.0", "op_name": self.op_name, "attempt": self.attempt,
                 "status": "error", "error": str(e), "traceback": traceback.format_exc(),
+                "outputs": [], "primary_hint": "error",
             }
             rp = os.path.join(self.tuning_dir, f"forensics_report_{self.attempt}.json")
             with open(rp, "w") as f:
                 json.dump(err, f, indent=2, ensure_ascii=False)
             print(f"[FORENSICS] ❌ 取证失败: {e}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
             sys.exit(1)
 
-    def _classify_pattern(self, mismatch_frac: float, max_diff: float) -> str:
-        if mismatch_frac >= 0.9:
-            return "all_wrong"
-        elif mismatch_frac >= 0.3:
-            return "scattered"
-        elif max_diff > 1.0:
-            return "magnitude_correlated"
-        elif mismatch_frac > 0:
-            return "tail_spike"
-        return "pass"
+        finally:
+            if dump_dir:
+                executor.cleanup_dump(dump_dir)
+
+    # ------------------------------------------------------------------
+    # Helpers for new run()
+
+    def _analyze_path_across_cases(
+        self, path: str, per_case_flat: list, cases: list, analyzer
+    ) -> list:
+        """For each case that has an 'ok' tensor at `path`, run DiffAnalyzer.
+
+        Returns list of per-case diff dicts, each tagged with case_idx and
+        a private `_int8` / `_nan_inf_src` flag for aggregation.
+        """
+        per_case_diffs = []
+        for case_idx, flat in enumerate(per_case_flat):
+            if path not in flat:
+                continue
+            pcp = flat[path]
+            if pcp["kind"] != "tensor" or pcp["status"] != "ok":
+                continue
+
+            case = cases[case_idx]
+            atol = float(case["atol"])
+            rtol = float(case["rtol"])
+            is_int8 = bool(case["int8_triggered"])
+
+            ref_t = pcp["ref"]
+            cand_t = pcp["cand"]
+
+            # Record raw NaN/Inf on pre-nan_to_num tensors (for diagnostics)
+            nan_inf_ref = self._nan_inf_counts(ref_t)
+            nan_inf_cand = self._nan_inf_counts(cand_t)
+
+            # Comparison mask follows verification_ascendc: nan_to_num, then
+            # abs-diff > atol + rtol * abs(golden/cand).
+            ref_fp = torch.nan_to_num(ref_t.to(torch.float32))
+            cand_fp = torch.nan_to_num(cand_t.to(torch.float32))
+            ref_np = ref_fp.cpu().numpy()
+            cand_np = cand_fp.cpu().numpy()
+
+            analyzer.ATOL = atol
+            analyzer.RTOL = rtol
+            diff = analyzer.analyze(ref_np, cand_np)
+            diff["basic_stats"]["int8_special_tolerance"] = is_int8
+            diff["case_idx"] = case_idx
+            diff["_int8"] = is_int8
+            diff["_nan_inf_src"] = {"ref": nan_inf_ref, "cand": nan_inf_cand}
+            per_case_diffs.append(diff)
+        return per_case_diffs
+
+    def _pick_representative(self, per_case_diffs: list) -> int:
+        """max mismatch_ratio; tiebreak max_abs_diff."""
+        return max(
+            range(len(per_case_diffs)),
+            key=lambda i: (
+                per_case_diffs[i]["basic_stats"]["mismatch_ratio"],
+                per_case_diffs[i]["basic_stats"]["max_abs_diff"],
+            ),
+        )
+
+    def _compute_case_aggregate(self, per_case_diffs: list, cases: list) -> dict:
+        ratios = [d["basic_stats"]["mismatch_ratio"] for d in per_case_diffs]
+        max_diffs = [d["basic_stats"]["max_abs_diff"] for d in per_case_diffs]
+        n_pass = sum(
+            1 for d in per_case_diffs if d["basic_stats"]["num_mismatched"] == 0
+        )
+        n_fail = len(per_case_diffs) - n_pass
+
+        # heuristic: shape_conditional — does mismatch ratio correlate with
+        # "last dim" of the case's first input tensor?
+        shape_conditional = False
+        try:
+            last_dims = []
+            for d in per_case_diffs:
+                inputs = cases[d["case_idx"]]["inputs"]
+                first_tensor = self._first_tensor_in(inputs)
+                if first_tensor is not None and first_tensor.ndim > 0:
+                    last_dims.append(int(first_tensor.shape[-1]))
+                else:
+                    last_dims.append(0)
+            if len(last_dims) >= 3 and len(set(last_dims)) >= 2:
+                r_last = np.array(last_dims, dtype=float)
+                r_mis = np.array(ratios, dtype=float)
+                if r_last.std() > 0 and r_mis.std() > 0:
+                    corr = float(np.corrcoef(r_last, r_mis)[0, 1])
+                    if not np.isnan(corr) and abs(corr) > 0.7:
+                        shape_conditional = True
+        except Exception:
+            pass
+
+        all_same_pattern = (
+            len({d["pattern_hint"]["primary_hint"] for d in per_case_diffs}) == 1
+        )
+
+        return {
+            "num_cases": len(per_case_diffs),
+            "mismatch_ratio_min": min(ratios),
+            "mismatch_ratio_max": max(ratios),
+            "mismatch_ratio_mean": sum(ratios) / len(ratios),
+            "max_abs_diff_min": min(max_diffs),
+            "max_abs_diff_max": max(max_diffs),
+            "pass_case_count": n_pass,
+            "fail_case_count": n_fail,
+            "all_cases_same_pattern": all_same_pattern,
+            "shape_conditional": shape_conditional,
+        }
+
+    def _init_nan_inf_agg(self) -> dict:
+        return {
+            "ref": {"has_nan": False, "has_inf": False,
+                    "nan_count": 0, "inf_count": 0},
+            "cand": {"has_nan": False, "has_inf": False,
+                     "nan_count": 0, "inf_count": 0},
+        }
+
+    def _accumulate_nan_inf(self, agg: dict, pcd: dict) -> None:
+        src = pcd.get("_nan_inf_src") or {}
+        for side in ("ref", "cand"):
+            s = src.get(side, {})
+            agg[side]["has_nan"] = agg[side]["has_nan"] or bool(s.get("has_nan"))
+            agg[side]["has_inf"] = agg[side]["has_inf"] or bool(s.get("has_inf"))
+            agg[side]["nan_count"] += int(s.get("nan_count", 0))
+            agg[side]["inf_count"] += int(s.get("inf_count", 0))
+
+    def _nan_inf_counts(self, t) -> dict:
+        if not isinstance(t, torch.Tensor):
+            return {"has_nan": False, "has_inf": False, "nan_count": 0, "inf_count": 0}
+        nan_n = int(torch.isnan(t).sum().item()) if t.numel() else 0
+        inf_n = int(torch.isinf(t).sum().item()) if t.numel() else 0
+        return {
+            "has_nan": nan_n > 0, "has_inf": inf_n > 0,
+            "nan_count": nan_n, "inf_count": inf_n,
+        }
+
+    def _strip_private_keys(self, d: dict) -> dict:
+        return {k: v for k, v in d.items() if not k.startswith("_")}
+
+    def _first_tensor_in(self, obj):
+        if isinstance(obj, torch.Tensor):
+            return obj
+        if isinstance(obj, (list, tuple)):
+            for item in obj:
+                t = self._first_tensor_in(item)
+                if t is not None:
+                    return t
+        if isinstance(obj, dict):
+            for item in obj.values():
+                t = self._first_tensor_in(item)
+                if t is not None:
+                    return t
+        return None
+
+    def _extract_input_tensors_for_layout(self, inputs) -> list:
+        """Flatten inputs to a list of Tensors for MemoryLayoutAnalyzer."""
+        tensors = []
+        def walk(o):
+            if isinstance(o, torch.Tensor):
+                tensors.append(o)
+            elif isinstance(o, (list, tuple)):
+                for x in o:
+                    walk(x)
+            elif isinstance(o, dict):
+                for x in o.values():
+                    walk(x)
+        walk(inputs)
+        return tensors
+
+    def _synthetic_report(self, cases: list, metadata: dict, op_type_info: dict) -> dict:
+        """Used when no tensor outputs were analyzable (e.g. all outputs are
+        scalars, or all paths had type/shape mismatches). Produces a minimal
+        output_report entry that still satisfies Gate-F schema."""
+        num_cases = metadata.get("num_cases", 0)
+        return {
+            "output_index": 0,
+            "output_path": "output",
+            "output_kind": "none",
+            "output_shape": None,
+            "output_dtype": None,
+            "pass_fail": False,
+            "basic_stats": {
+                "max_abs_diff": 0.0, "mean_abs_diff": 0.0,
+                "median_abs_diff": 0.0, "p99_abs_diff": 0.0,
+                "num_mismatched": 0, "total_elements": 0,
+                "mismatch_ratio": 1.0, "match_rate": 0.0,
+                "int8_special_tolerance": False,
+            },
+            "error_distribution": None,
+            "value_range": None,
+            "pattern_hint": {
+                "primary_hint": "structural_mismatch",
+                "primary_confidence": 0.5,
+                "primary_evidence": "no analyzable tensor outputs found",
+                "all_hints": [],
+            },
+            "worst_elements": [],
+            "tail_analysis": {},
+            "dimension_analysis": [],
+            "L5_intermediate": None,
+            "L7_code_mapping": None,
+            "L8_op_type": op_type_info.get("op_type", "unknown"),
+            "per_case": [],
+            "representative_case_idx": 0,
+            "case_aggregate": {
+                "num_cases": num_cases,
+                "mismatch_ratio_min": 1.0, "mismatch_ratio_max": 1.0,
+                "mismatch_ratio_mean": 1.0,
+                "max_abs_diff_min": 0.0, "max_abs_diff_max": 0.0,
+                "pass_case_count": 0, "fail_case_count": num_cases,
+                "all_cases_same_pattern": True,
+                "shape_conditional": False,
+            },
+        }
 
 
 def main():
