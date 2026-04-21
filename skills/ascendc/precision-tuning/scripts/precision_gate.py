@@ -29,7 +29,7 @@ import re
 import sys
 from pathlib import Path
 _SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = _SCRIPT_DIR.parent.parent.parent   # AscendOpGenAgent/
+REPO_ROOT = _SCRIPT_DIR.parent.parent.parent.parent   # AscendOpGenAgent/
 
 
 MAX_ATTEMPTS = 2
