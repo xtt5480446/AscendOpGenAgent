@@ -51,11 +51,15 @@ CPP_SUFFIXES = {".cpp", ".cc", ".cxx", ".h", ".hpp"}
 
 # at:: / torch:: 调用中放行的 "allocator / metadata" 白名单
 CPP_ALLOWED_ATEN_FUNCS = {
+    # allocator
     "empty", "empty_like", "empty_strided",
     "zeros", "zeros_like",
     "ones", "ones_like",
     "full", "full_like",
     "from_blob",
+    # TensorOptions metadata builders — at::device(...).dtype(...) 这种链式 option 构造
+    "device", "dtype", "scalar_type", "layout",
+    "requires_grad", "memory_format", "pinned_memory",
 }
 
 ATEN_CALL_RE = re.compile(r"\bat::([A-Za-z_]\w*)\s*\(")
