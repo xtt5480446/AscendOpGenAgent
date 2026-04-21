@@ -91,6 +91,7 @@ argument-hint: >
 7. **重试时历史读取顺序**: 先读 `tuning_directions.json` 获取跨轮方向全貌（fix_type/outcome/improvement_ratio 一览），再按需读 `round_summary_N.json` 的 `index.sections.*` 路径深入具体 section 小文件；禁止跳过 `tuning_directions.json` 直接全量读 `precision_audit_{N}.md`。
 8. **[DIRECTION_ASSESSMENT] 严格二值**: "本轮是否延续上一轮方向" 只能填 "是" 或 "否"，Gate-A 二值校验会拒绝其他内容
 9. **知识库检索必须带 --log-path**: 两次 search 调用均需加 `--log-path` 和 `--call-index`，否则检索记录不可观测
+10. **精简 PASS 不等于最终 PASS**: 若 `{task_dir}/{op_name}.json.bak` 存在，则 Gate-V 通过后必须恢复 `.json.bak -> .json` 再跑全量验证；只有全量验证通过才算最终成功
 
 ### 反作弊约束（硬约束，不可违反）
 

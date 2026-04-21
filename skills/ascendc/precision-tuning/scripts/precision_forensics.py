@@ -560,6 +560,8 @@ class DiffAnalyzer:
         }
 
     def _check_tail_spike(self, mm, shape):
+        if len(shape) == 0:
+            return None
         ld = shape[-1]
         for ts in [8, 16, 32, 64, 128, 256]:
             if ld <= ts:
@@ -647,6 +649,8 @@ class DiffAnalyzer:
                  "L7_gm_offset": None, "L7_source_line": None} for i in idx]
 
     def _tail_analysis(self, abs_diff, mm, shape):
+        if len(shape) == 0:
+            return {"last_dim": None, "note": "scalar output has no tail dimension"}
         ld = shape[-1]
         results = {}
         for ts in [8, 16, 32, 64, 128, 256]:

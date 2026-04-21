@@ -115,6 +115,11 @@ argument-hint: >
 9. **[DIRECTION_ASSESSMENT] 严格二值**: "本轮是否延续上一轮方向" 只能填 "是" 或 "否", Gate-A 二值校验会拒绝其他内容
 10. **知识库检索必须带 --log-path**: 两次 `search` 调用均需加 `--log-path` 和 `--call-index`, 否则检索记录不可观测
 
+补充要求：
+- 若 `{task_dir}/{op_name}.json.bak` 存在，则当前 `{op_name}.json` 视为精简用例；Agent 在精简用例通过后，**必须**恢复 `.json.bak -> .json` 并再跑一次全量 AscendC 验证
+- 只有“精简用例通过 + 全量用例通过”都满足时，才能判定任务最终成功
+- `run_precision_tuning.sh` 只负责调度 Agent，不负责替 Agent 自动恢复 `.json.bak` 或执行全量验证；该行为必须体现在 Agent/Skill 工作流里
+
 ### 工作目录限制
 
 只允许读写 `{repo_root}/` 内的路径，包括：

@@ -628,6 +628,8 @@ Gate-V 输出包含 **loop_signal**, 你**必须遵守**:
 
 ⚠️ **你不能自行决定继续或停止。loop_signal 由 Gate 脚本根据数值趋势决定, Agent 必须遵守。**
 
+> 注意：这里的 Gate-V 只校验“当前 `{op_name}.json`”对应的验证结果。若任务目录还存在 `{op_name}.json.bak`，则这通常意味着当前 `.json` 是精简用例，**还不能直接宣布最终成功**；必须继续执行 Step 5 中的全量用例验证。
+
 ---
 
 ### 归档当前轮次 (CONTINUE 时执行)
@@ -676,7 +678,39 @@ cp "{task_dir}/model_new_ascendc.py" \
 
 精度通过后:
 
-**5.0 归档当前轮次 + 更新 current_best（PASS 时必须执行）:**
+**5.0 全量用例验证（若存在 `.json.bak`，则为强制步骤）**
+
+若 `{task_dir}/{op_name}.json.bak` 存在，说明当前 `{op_name}.json` 为精简用例；此时必须先恢复全量用例，再做一次最终验证：
+
+```bash
+if [ -f "{task_dir}/{op_name}.json.bak" ]; then
+    cp "{task_dir}/{op_name}.json.bak" "{task_dir}/{op_name}.json"
+    bash skills/ascendc/ascendc-translator/references/evaluate_ascendc.sh {task_name}
+fi
+```
+
+处理规则：
+- 若 `.json.bak` 不存在：跳过本步骤，直接进入 5.1
+- 若全量验证通过：继续进入 5.1
+- 若全量验证失败：**不得**宣布成功；仅允许继续修改 `{task_dir}/kernel/` 下文件，并重新执行全量验证
+- 全量验证失败后的补救次数最多 3 次（含首次全量验证）；超过次数仍失败，则转 Step 6 失败报告
+- 若做过全量验证，最终成功报告中的 `final_match_rate` / `final_max_diff` 应以全量验证结果为准，而不是精简验证结果
+
+建议额外保存全量验证结果：
+
+```json
+{task_dir}/precision_tuning/full_validation_result_attempt_{attempt}.json
+{
+  "attempt": <N>,
+  "used_full_cases": true,
+  "correctness_passed": true/false,
+  "evaluate_stdout": "<全量 evaluate_ascendc.sh 完整输出>",
+  "match_rate": "<从 stdout 提取>",
+  "max_diff": "<从 stdout 提取>"
+}
+```
+
+**5.1 归档当前轮次 + 更新 current_best（最终 PASS 时必须执行）:**
 ```bash
 # 归档本轮取证报告和审计报告
 mkdir -p "{task_dir}/precision_tuning/history/attempt_{attempt}"
@@ -695,7 +729,7 @@ echo "100.0" > "{task_dir}/precision_tuning/history/current_best/match_rate.txt"
 echo "精度通过，current_best 已更新为 100.0"
 ```
 
-**5.1 生成候选知识库条目 (Agent 执行):**
+**5.2 生成候选知识库条目 (Agent 执行):**
 
 基于 [ROOT_CAUSE] 和 [FIX_PLAN]，生成一条知识库候选条目，写入：
 `{task_dir}/precision_tuning/candidate_kb_entry.json`
@@ -717,7 +751,7 @@ echo "精度通过，current_best 已更新为 100.0"
 - `fix` 要通用，不要引用具体代码行号或变量名
 - `type` 必须从以下枚举中选择：FIX_PRECISION_PADDING / FIX_PRECISION_TAIL / FIX_PRECISION_REDUCTION / FIX_PRECISION_TYPECAST / FIX_PRECISION_LAYOUT / FIX_PRECISION_SYNC / FIX_PRECISION_OVERFLOW / FIX_PRECISION_LOGIC / FIX_PRECISION_OTHER
 
-**5.2 写入知识库 (Python 执行):**
+**5.3 写入知识库 (Python 执行):**
 ```bash
 python3 skills/ascendc/precision-tuning/scripts/precision_knowledge.py dump \
     --kb-path skills/ascendc/precision-tuning/references/precision_knowledge_base.json \
@@ -725,7 +759,7 @@ python3 skills/ascendc/precision-tuning/scripts/precision_knowledge.py dump \
     --op-name {op_name}
 ```
 
-**5.3 保存成功代码快照:**
+**5.4 保存成功代码快照:**
 ```bash
 # 将最终通过代码保存到 history/success/（永久保留，不覆盖）
 mkdir -p "{task_dir}/precision_tuning/history/success/code_snapshot"
@@ -744,13 +778,13 @@ echo "成功代码已保存到 history/success/code_snapshot/"
 >    "{task_dir}/model_new_ascendc.py"
 > ```
 
-**5.4 输出成功报告:**
+**5.5 输出成功报告:**
 ```
 [PRECISION_TUNING_RESULT]
   status: SUCCESS
   attempts: <总轮次>
-  final_match_rate: <最终 match rate>
-  final_max_diff: <最终 max diff>
+  final_match_rate: <最终 match rate，若跑过全量则取全量结果>
+  final_max_diff: <最终 max diff，若跑过全量则取全量结果>
   root_cause_summary: <一句话总结根因>
   fix_summary: <一句话总结修复内容>
 ```

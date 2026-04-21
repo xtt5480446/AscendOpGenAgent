@@ -145,6 +145,80 @@ anticheat_run() {
     "
 }
 
+# ── 全量验证后置检查：若存在 <op>.json.bak，则要求产出 full_validation_result_attempt_*.json 且通过 ──
+fullcase_check() {
+    local task_dir="$1"
+    python3 - "$task_dir" <<'PY'
+import json
+import os
+import re
+import sys
+
+task_dir = sys.argv[1]
+result = {
+    "required": False,
+    "passed": True,
+    "reason": "",
+    "result_path": None,
+    "case_backup": None,
+}
+
+try:
+    bak_files = sorted(
+        name for name in os.listdir(task_dir)
+        if name.endswith(".json.bak")
+    )
+except OSError:
+    result["passed"] = False
+    result["reason"] = "task_dir_unreadable"
+    print(json.dumps(result, ensure_ascii=False))
+    raise SystemExit
+
+if not bak_files:
+    print(json.dumps(result, ensure_ascii=False))
+    raise SystemExit
+
+result["required"] = True
+result["case_backup"] = bak_files[0]
+
+tuning_dir = os.path.join(task_dir, "precision_tuning")
+pattern = re.compile(r"full_validation_result_attempt_(\d+)\.json$")
+candidates = []
+if os.path.isdir(tuning_dir):
+    for name in os.listdir(tuning_dir):
+        match = pattern.fullmatch(name)
+        if match:
+            candidates.append((int(match.group(1)), os.path.join(tuning_dir, name)))
+
+if not candidates:
+    result["passed"] = False
+    result["reason"] = "missing_full_validation_result"
+    print(json.dumps(result, ensure_ascii=False))
+    raise SystemExit
+
+_, latest_path = max(candidates, key=lambda item: item[0])
+result["result_path"] = latest_path
+
+try:
+    with open(latest_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+except Exception:
+    result["passed"] = False
+    result["reason"] = "full_validation_result_parse_error"
+    print(json.dumps(result, ensure_ascii=False))
+    raise SystemExit
+
+if not payload.get("used_full_cases", False):
+    result["passed"] = False
+    result["reason"] = "full_validation_not_marked_full_cases"
+elif not payload.get("correctness_passed", False):
+    result["passed"] = False
+    result["reason"] = "full_validation_failed"
+
+print(json.dumps(result, ensure_ascii=False))
+PY
+}
+
 # ── worker：从队列拉任务，跨 docker 执行 codex ──
 run_worker() {
     local container="$1" npu="$2"
@@ -228,10 +302,37 @@ except Exception:
             echo "[${container}@npu${npu}] 🚨 CHEAT detected for $task_name: $cheat_reasons — baseline restored" | tee -a "$wlog"
         fi
 
+        local fullcase_json fullcase_required fullcase_passed fullcase_reason
+        fullcase_json=$(fullcase_check "$task_dir" 2>/dev/null || true)
+        fullcase_required=$(echo "$fullcase_json" | python3 -c "
+import sys, json
+try:
+    print('yes' if json.loads(sys.stdin.read()).get('required') else 'no')
+except Exception:
+    print('no')
+" 2>/dev/null || echo "no")
+        fullcase_passed=$(echo "$fullcase_json" | python3 -c "
+import sys, json
+try:
+    print('yes' if json.loads(sys.stdin.read()).get('passed') else 'no')
+except Exception:
+    print('no')
+" 2>/dev/null || echo "no")
+        fullcase_reason=$(echo "$fullcase_json" | python3 -c "
+import sys, json
+try:
+    print(json.loads(sys.stdin.read()).get('reason', ''))
+except Exception:
+    print('')
+" 2>/dev/null || echo "")
+
         local icon
         if [[ "$cheat_verdict" == "CHEAT" ]]; then
             icon="🚨 CHEAT${cheat_note}"
             echo "[${container}@npu${npu}] 🚨 $task_name CHEAT (${elapsed}s)"
+        elif [[ $status -eq 0 && "$fullcase_required" == "yes" && "$fullcase_passed" != "yes" ]]; then
+            icon="❌ 失败(${fullcase_reason:-fullcase_missing})"
+            echo "[${container}@npu${npu}] ❌ $task_name missing/failed full-case verification (${fullcase_reason:-unknown}, ${elapsed}s)" | tee -a "$wlog"
         elif [[ $status -eq 0 ]]; then
             icon="✅ 成功"
             echo "[${container}@npu${npu}] ✅ $task_name (${elapsed}s)"
