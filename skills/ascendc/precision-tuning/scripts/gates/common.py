@@ -132,6 +132,26 @@ def check_audit_file_present(task_dir: Path, attempt: int) -> dict:
     }
 
 
+# 这些是"必须为 True 才视为通过"的 gating key；其余为纯诊断信息不参与 ok 判定。
+# 设计契约（findings.md §3.3 ② / §7.6）：只有明确反映"前置 / 不变量"失败的 key 才 gating。
+_GATING_KEYS = {
+    # anticheat: 只有 pass 参与，baseline_present/hash_* 是诊断
+    "anticheat_pass",
+    # ast: 只看 degrade_pass；validator_present 是诊断
+    "ast_degrade_pass",
+    # structure
+    "has_kernel_dir",
+    "has_model_new_ascendc",
+    "json_bak_preserved_if_exists",
+    # eval_status (validate step)
+    "eval_status_latest_present",
+    "eval_status_schema_ok",
+    # audit file (audit/fix/validate steps)
+    "audit_file_present",
+    "audit_file_nonempty",
+}
+
+
 def run_common(step: str, task_dir: Path, op_name: str, attempt: int) -> GateOutcome:
     """对给定 step 组合适用的通用检查。返回 GateOutcome。
 
@@ -139,6 +159,9 @@ def run_common(step: str, task_dir: Path, op_name: str, attempt: int) -> GateOut
     - audit:     +audit 文件存在
     - fix:       +audit 文件存在（fix 不单独 Gate，此处复用 audit）
     - validate:  +eval_status + audit 文件
+
+    只有 `_GATING_KEYS` 中的键参与 ok 判定；其它 (baseline_present / validator_present 等)
+    为纯诊断信息。
     """
     checks: dict = {}
     checks.update(check_anticheat(task_dir))
@@ -148,6 +171,10 @@ def run_common(step: str, task_dir: Path, op_name: str, attempt: int) -> GateOut
         checks.update(check_eval_status_present(task_dir))
     if step in ("audit", "fix", "validate"):
         checks.update(check_audit_file_present(task_dir, attempt))
-    # 只对 bool 值判定；非 bool (str/None) 忽略
-    ok = all(v for v in checks.values() if isinstance(v, bool))
+
+    ok = all(
+        checks.get(k, True) is True
+        for k in _GATING_KEYS
+        if k in checks
+    )
     return GateOutcome(gate=f"GATE-COMMON-{step}", ok=ok, checks=checks)
