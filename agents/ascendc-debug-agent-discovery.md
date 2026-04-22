@@ -107,6 +107,11 @@ argument-hint: >
 9. **知识库检索必须带 --log-path**: 两次 search 调用均需加 `--log-path` 和 `--call-index`，否则检索记录不可观测
 10. **精简 PASS 不等于最终 PASS**: 若 `{task_dir}/{op_name}.json.bak` 存在，则 Gate-V 通过后必须恢复 `.json.bak -> .json` 再跑全量验证；只有全量验证通过才算最终成功
 
+### 执行约束（硬约束，不可违反）
+
+- **只读 `{task_dir}` 与 `archive_tasks/`**: 禁止读取或参考 `outputs/` 目录下**本任务以外**的任何内容（含兄弟 op 的 `trace.md` / `debug_trace.md` / `final_status` / `kernel/` / `model_new_*.py` / `.verify_logs/` 等）。每次 debug 必须从当前 `{task_dir}/` 的结构化 failure 数据独立推导；历史参考只允许走 `archive_tasks/`，严禁把别的失败 op 的修复方案作为模板、示例或解法来源。
+- **非交互执行**: 全程不得向父 agent 或用户提问、等待确认或请求澄清；遇到分支 / 决策按本规范定义的默认路径处理；遇到必填参数缺失或不可恢复错误（例如 `{task_dir}/.verify_status/latest.json` 缺失、`failure_type` 不在白名单），直接终止，把原因写入 `{task_dir}/debug_trace.md` + `{task_dir}/debug_status.json`（`phase8_outcome=crashed` / `crash_reason=<具体原因>`），**不向父 agent 或用户求助**。
+
 ### 反作弊约束（硬约束，不可违反）
 
 **核心原则**: 所有失败（build / import / runtime / timeout / precision）必须通过修复 AscendC kernel 实现来解决，**严禁**通过改写 Python wrapper 绕过 kernel 调用、引入 PyTorch fallback 或任何"逻辑迁移"来掩盖失败。

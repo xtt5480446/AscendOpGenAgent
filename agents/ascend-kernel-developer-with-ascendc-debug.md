@@ -489,7 +489,7 @@ while ac_iteration < max_ac_iterations:
 
 ---
 
-## Phase 6: 全量用例验证（只读）
+## Phase 6: 全量用例验证
 
 将 `{output_dir}/<op_name>.json.bak` 恢复为 `{output_dir}/<op_name>.json`（覆盖精简后的版本，恢复全量测试用例），直接跑一次 `verification_ascendc.py` 并用 `classify_verify_result.py` 落盘：
 
@@ -564,6 +564,12 @@ wait_agent(targets=[<spawn 返回的 thread>], timeout_ms=5_400_000)
 - **路径**: 容器内绝对路径；主 agent 与 subagent 共享同一工作目录挂载，无需跨容器传输。
 - **超时**: `wait_agent(timeout_ms=5_400_000)` 即 1.5h；超时后按 8.3 的 `timeout` 分支兜底（必要时再 `close_agent`）。
 - **产物**: subagent 正常退出时必产出 `{output_dir}/debug_trace.md` + `{output_dir}/debug_status.json`；主 agent 只校验产物存在，不改写内容。
+- **不监控 subagent（硬约束）**: `spawn_agent` 之后主 agent **只调一次 `wait_agent` 阻塞等结果**，期间禁止以下行为：
+  - ❌ `send_input` / `resume_agent` / 中途 `close_agent`（除非已超时兜底）
+  - ❌ 读取 subagent 还没 finalize 的中间产物（如正在写的 `debug_trace.md`、kernel 目录、`.verify_logs/` 新文件）
+  - ❌ 在主 session 里"顺手看一眼进度"、复述 subagent 输出、追问状态
+  - 理由: subagent 的 `agent_states` 会作为 observation 反灌回主 agent 上下文；任何主动查看都会把中间态污染到主 agent 的 reasoning，反过来诱发不必要的 `send_input`，打断 subagent 的自主推理。
+  - 正确姿态: 发出 spawn 后主 agent **立即 `wait_agent` 并保持沉默**；`wait_agent` 返回后再按"产物"一条做存在性校验，校验不通过走 8.3 兜底。
 
 ### 8.3 主 agent 兜底写 `debug_status.json`
 
