@@ -864,6 +864,111 @@ cp "{task_dir}/model_new_ascendc.py" \
 
 ---
 
+### Step 7: 退出前强制产物（所有分支 / 所有结局共用）
+
+> **本 Step 是 Step 5 / Step 6 的共同前置**：无论 session 以 `success` / `failed` / `stopped_by_gate` / `stopped_by_loop_limit` / `progressed_to_new_failure_type` / `timeout` / `skipped_env_issue` / `skipped_unsupported_type` 中哪种结局退出，subagent 在返回主 agent 之前**必须**产出以下两份文件。任一缺失将被主 agent 视为异常退出，由主 agent 写兜底 `debug_status.json`（`phase8_outcome: missing_artifacts`），本 session 的 debug 叙事就丢失了。
+
+#### 7.1 `{task_dir}/debug_trace.md`（详细叙事，4 节强制 + 可选附录）
+
+**原则**：详细程度对标 `trace.md`，但只强制**有可靠数据源的 section**（findings §3.2.6）。
+
+```markdown
+# AscendC Debug Trace
+
+## 1. Phase 8 入口快照（强制）
+- 调用时间: <ISO timestamp>
+- task_dir: {task_dir}
+- session_branch: <1-P / 1-B / 1-I / 1-R / 1-T>
+- 上游 trace.md.final_status 的完整 JSON 快照（含 ac_iterations 历史）
+- 上游 .eval_status/latest.json 完整快照
+- 进入时 kernel/ 基线快照路径（`precision_tuning/history/baseline/code_snapshot`）
+
+## 2. 迭代历史（强制，每轮一节）
+
+### Attempt 0
+- 进入时 eval_status 关键字段: failure_type, failed_step, duration_sec, exit_code
+- 诊断摘要: 引用 audit_0.md（或对应分支 audit 文件）的摘要 section
+- 修复代码改动: 修改文件列表 + 函数 / 行号级 diff 摘要（不贴全文）
+- Gate-通用: PASS / FAIL + 未通过项
+- Gate-分支 (F/A/V): PASS / FAIL + 关键数值
+  - 1-P: mismatch_ratio / max_abs_diff 变化
+  - 1-B: failed_step 推进情况
+  - 1-I: import.status 变化
+  - 1-R: crash signal / crash 位置变化
+  - 1-T: duration_sec 变化
+- 本轮退出 eval_status 快照
+- outcome: passed / improved / stagnant / regressed
+
+### Attempt 1 ... N（同上）
+
+## 3. 最终 Verdict（强制）
+- session_outcome: success / failed / stopped_by_gate / stopped_by_loop_limit / progressed_to_new_failure_type / timeout / skipped_env_issue / skipped_unsupported_type
+- 退出时 eval_status 快照
+- 若 success: 确认全量 `.json.bak` 恢复后 verify 通过
+- 若 failed / stopped_*: 明确原因
+- 若 progressed_to_new_failure_type: 新 failure_type 是什么（主 agent 读取后自行决定是否二次 spawn）
+
+## 4. 产物清单（强制）
+- 各轮 audit 文件相对 {task_dir} 路径
+- tuning_directions.json（精度分支）或对应分支的方向记录文件
+- history/baseline/code_snapshot/ 和各轮 attempt_N/code_snapshot/
+- .eval_status/phase8_attempt_*.json
+- debug_status.json 路径
+
+## 附录 A: 走偏点（可选但推荐）
+- 尝试失败的修复方向摘要（对应 tuning_directions.json outcome ∈ {stagnant, regressed}）
+- 平台 / API 限制 workaround
+- 反作弊触发记录
+
+## 附录 B: 知识库检索记录（仅精度分支 + 其他分支若有）
+- search 调用次数 + 主要关键词
+- 命中的 knowledge entries
+
+## 附录 C: 耗时细分（可选）
+- 总 wall clock（eval_wrapper 各轮 JSON 的 started_at/ended_at 差值之和 + subagent 整体运行时间）
+- 若能区分 Step 级耗时则列出，不能则写"未精细记录"
+```
+
+**强制要求**（findings §3.2.6）：
+- 只强制 4 节（入口快照 / 迭代历史 / Verdict / 产物清单），其余为附录
+- 第 2 节每一轮都不可省略（含 attempt 0 到最后一轮）
+- 第 4 节产物清单必须是 `{task_dir}` 下的**相对路径**
+- 中文为主，代码 / 路径 / 识别符用英文；Markdown 层级严格 `## 1. ... ## 2. ...`；JSON 快照用 fenced code block 内嵌
+
+#### 7.2 `{task_dir}/debug_status.json`（机器可读 verdict）
+
+```json
+{
+  "schema_version": 1,
+  "phase8_outcome": "success | failed | stopped_by_gate | stopped_by_loop_limit | progressed_to_new_failure_type | timeout | skipped_env_issue | skipped_unsupported_type",
+  "session_branch": "1-P | 1-B | 1-I | 1-R | 1-T",
+  "started_at": "<ISO>",
+  "ended_at": "<ISO>",
+  "attempts_used": <int>,
+  "entry_failure_type": "<进入时的 final_status.failure_type>",
+  "final_failure_type": "<从最后一次 .eval_status/phase8_attempt_{N}.json 读取>",
+  "final_eval_status_path": "{task_dir}/.eval_status/phase8_attempt_{N}.json",
+  "notes": "<一句话说明，例：首轮 COMPILE_ERROR 已定位为 template_arg_fix，attempt 1 Gate-V 推进至 import>"
+}
+```
+
+**字段约束**：
+- `schema_version = 1`（本版本固定）
+- `phase8_outcome` 必须是上列 8 种之一；其他值视为未知结局，由主 agent 兜底
+- `session_branch` 必须与 Step 0.3 锁定的分支一致
+- `started_at` / `ended_at` 用 ISO 8601（带 UTC 时区）
+- `final_failure_type` 从**最后一次**本 session 内触发的 `utils/eval_wrapper.py` 产出读取；若一次都没跑（例如 `skipped_*`），与 `entry_failure_type` 一致
+- `final_eval_status_path` 也指向最后一次本 session 内的 phase8_attempt_N.json；未跑时为 `null`
+
+#### 7.3 硬约束重申
+
+- ⛔ **禁止 subagent append `trace.md`**（findings §7.3）—— `trace.md` 在 Phase 7 写完后**全程只读**；所有 Phase 8 叙事 / verdict 都落到 `debug_trace.md` + `debug_status.json`
+- ⛔ **禁止 subagent 修改 `utils/` / `CMakeLists.txt` / `setup.py` / `agents/` / `skills/`** —— 只能改 `{task_dir}/kernel/` 下文件，`{task_dir}/precision_tuning/` 下写 skill 产物
+- ⛔ **禁止 subagent 删除或重写 `{task_dir}/trace.md`、`{task_dir}/.eval_status/latest.json`、`{task_dir}/{op_name}.json.bak`**（上游 artefact，只读）
+- 写完 `debug_trace.md` + `debug_status.json` 后，再进入 Step 5（成功）或 Step 6（失败）的**报告输出**部分；Step 5 / 6 里的"归档当前轮 / 更新 current_best / 全量验证"等动作在写 Step 7 产物前完成即可（Step 7 是退出前的最后一步，只负责 debug_trace / debug_status 两份产物）
+
+---
+
 ### Step 5: 成功收尾
 
 精度通过后:
