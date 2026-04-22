@@ -53,7 +53,7 @@ PROMPT_TEMPLATE='严格按照 /home/c00959374/AscendOpGenAgent/agents/ascend-ker
 8. 全程不要向用户询问或等待交互；遇到分支/决策均按 agent 规范定义的默认路径处理
 9. 结束时在 __TARGET__/ 输出一份简短的 trace/final 报告（Phase 7），说明各阶段成功/失败与最终产物清单'
 
-ANTICHEAT_SCRIPT="skills/ascendc/precision-tuning/scripts/anticheat.py"
+ANTICHEAT_SCRIPT="skills/ascendc/ascendc-debug/scripts/anticheat.py"
 
 # ── 参数解析 ──
 while [[ $# -gt 0 ]]; do

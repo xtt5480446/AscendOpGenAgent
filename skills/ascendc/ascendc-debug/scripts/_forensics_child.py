@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-_forensics_child.py — precision-tuning forensics 的子进程 tensor executor。
+_forensics_child.py — ascendc-debug forensics 的子进程 tensor executor。
 
 由 precision_forensics.py 主进程 spawn (subprocess.run) 调用，只做一件事：
   1. 加载 {task_dir}/model.py 和 {task_dir}/model_new_ascendc.py

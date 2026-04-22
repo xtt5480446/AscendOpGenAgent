@@ -8,7 +8,7 @@ kernel extensions). Typical invocation:
 
     ssh npu_server 'docker exec cjm_cann1 bash -c "
         cd /home/c00959374/AscendOpGenAgent
-        python3 skills/ascendc/precision-tuning/scripts/test_executor_parity.py
+        python3 skills/ascendc/ascendc-debug/scripts/test_executor_parity.py
     "'
 
 What it checks per fixture:
@@ -64,7 +64,7 @@ FIXTURES = [
     {
         "name": "3_Add_pt1",
         "task_dir": str(REPO_ROOT / "outputs" / "codex_batch_20260420_1755" / "3_Add_pt1"),
-        # precision-tuning starting point — may pass or fail; just checks parity
+        # ascendc-debug starting point — may pass or fail; just checks parity
         "expect_pass": None,
     },
 ]

@@ -1,6 +1,6 @@
 ---
 name: ascend-kernel-developer-with-ascendc-debug
-description: Ascend kernel 开发专家 Agent（含 AscendC Debug Subagent 集成）。主 agent 负责生成 + 初筛 + 归档；Phase 8 条件性 spawn precision-tuning-discovery 接手 build/import/runtime/timeout/precision 五类可自动修复失败。
+description: Ascend kernel 开发专家 Agent 带Ascend C debug功能
 temperature: 0.1
 
 tools:
@@ -18,7 +18,7 @@ skills:
   - trace-recorder
 
 subagents:
-  - precision-tuning-discovery
+  - ascendc-debug-agent-discovery
 
 argument-hint: >
   输入格式: "生成ascendC算子，npu=<NPU_ID>，算子描述文件为 <OP_FILE>，输出到 <OUTPUT_DIR>/"
@@ -34,7 +34,7 @@ argument-hint: >
 
 **职责边界（v3 架构）**：
 - 本 agent 负责 Phase 0-7（生成 + 初筛 + 归档），Phase 4 内循环上限压到 2，Phase 6 改为只读全量验证
-- **不做深度 debug**。Phase 7 产出 `trace.md` 末尾的 `final_status` JSON block，Phase 8 按 `debug_eligible` 条件性 spawn `precision-tuning-discovery` subagent 接手五类可自动修复失败（build / import kernel_side / runtime / timeout / precision）
+- **不做深度 debug**。Phase 7 产出 `trace.md` 末尾的 `final_status` JSON block，Phase 8 按 `debug_eligible` 条件性 spawn `ascendc-debug-agent-discovery` subagent 接手五类可自动修复失败（build / import kernel_side / runtime / timeout / precision）
 - subagent 自包含产出 `debug_trace.md` + `debug_status.json`；主 agent **不**兜底 verify / fix，**不**改写 `trace.md`
 
 ## 固定配置
@@ -56,7 +56,7 @@ Phase 4: AscendC 转译与验证  (ascendc-translator + 退化检测, max 2)
 Phase 5: 性能分析           (performance-analyzer)
 Phase 6: 全量用例验证（只读）
 Phase 7: Trace 记录 + final_status       (trace-recorder)
-Phase 8: Debug Subagent（条件性 spawn precision-tuning-discovery）
+Phase 8: Debug Subagent（条件性 spawn ascendc-debug-agent-discovery）
 ```
 
 ### 退化检测脚本
@@ -95,7 +95,7 @@ Phase 8: Debug Subagent（条件性 spawn precision-tuning-discovery）
 
 **必须存在的正向信号**：pybind11.cpp 或 host 文件里至少有一处 `<<<...>>>` triple-chevron kernel launch、`aclrtLaunchKernel(...)` 或 `*_do(...)` stub launcher，**否则判 `NO_KERNEL_LAUNCH`**。
 
-**检测时机**：每次生成 / 修改 `kernel/*.cpp` 或 `model_new_ascendc.py` 后，bench 会自动跑 `skills/ascendc/precision-tuning/scripts/anticheat.py verify`，命中即在批量报告标 🚨 CHEAT 并保留 `_anticheat.json` 供审查。**作弊任务不会自动重跑，但会进入人工审查队列**。如果你因平台/API 限制无法实现某算子，请在 Phase 7 trace.md 中如实记录失败原因，不要用 ATen fallback 掩盖。
+**检测时机**：每次生成 / 修改 `kernel/*.cpp` 或 `model_new_ascendc.py` 后，bench 会自动跑 `skills/ascendc/ascendc-debug/scripts/anticheat.py verify`，命中即在批量报告标 🚨 CHEAT 并保留 `_anticheat.json` 供审查。**作弊任务不会自动重跑，但会进入人工审查队列**。如果你因平台/API 限制无法实现某算子，请在 Phase 7 trace.md 中如实记录失败原因，不要用 ATen fallback 掩盖。
 ---
 
 ## Phase 0: 参数确认
@@ -330,7 +330,7 @@ ac_conductor_suggestion = ""
 ```
 
 > **v3 变更**：AscendC 迭代上限下调到 2。第 3 轮及以后的修复工作由 Phase 8 spawn
-> `precision-tuning-discovery` subagent 完成（findings §2.1, §2.5）。
+> `ascendc-debug-agent-discovery` subagent 完成（findings §2.1, §2.5）。
 
 ### 前置：TileLang → AscendC 转译（仅首次）
 
@@ -581,7 +581,7 @@ awk '/^```json/,/^```$/' "{output_dir}/trace.md" \
 
 ### 8.3 Spawn 调用
 
-- `subagent_type`: `precision-tuning-discovery`
+- `subagent_type`: `ascendc-debug-agent-discovery`
 - 传入参数：
   - `task_name` / `task_dir`（绝对路径 = `{output_dir}`）
   - `npu` ID
@@ -703,7 +703,7 @@ awk '/^```json/,/^```$/' "{output_dir}/trace.md" \
 | Phase 6 修复 | **禁止**（v3：只读全量验证，不修复，不重试） |
 | Phase 7 trace.md | Phase 7 写完后**全程只读**，主 agent 绝不 append |
 | Phase 8 subagent timeout | **5400s**（1.5h），超时/异常不重试，主 agent 兜底写 `debug_status.json` |
-| Phase 8 spawn 条件 | 只在 `trace.md.final_status.debug_eligible == true` 时 spawn `precision-tuning-discovery` |
+| Phase 8 spawn 条件 | 只在 `trace.md.final_status.debug_eligible == true` 时 spawn `ascendc-debug-agent-discovery` |
 | 禁止 PyTorch 退化 | `model_new_*.py` 中禁止 `torch.*` 计算操作 |
 | 退化检测前置 | 每次生成/修改 `model_new_tilelang.py` 或 `model_new_ascendc.py` 后，必须先通过退化检测脚本，再执行功能验证 |
 | A 类连续上限 | 同一退化子类型连续 ≥ 3 次 → 自动终止 |

@@ -1,5 +1,5 @@
 ---
-name: precision-tuning
+name: ascendc-debug
 description: >
   修复编译通过但精度测试失败的 AscendC 算子。
   通过数值取证 + Agent 深度分析 + 代码修复 + 重新验证的循环实现精度调优。
@@ -96,7 +96,7 @@ cp "{task_dir}/model_new_ascendc.py" \
 
 ```bash
 # 读结构化 eval_status（最后一次 evaluate 的 failure_type / failed_step / log 路径）
-python3 skills/ascendc/precision-tuning/scripts/eval_status.py \
+python3 skills/ascendc/ascendc-debug/scripts/eval_status.py \
     --task-dir {task_dir} | jq '.failure_type, .import_subtype, .timeout_marker_present'
 
 # 读 trace.md 末尾的 final_status JSON block（Phase 7 写入, 本 session 期间只读）
@@ -138,13 +138,13 @@ awk '/^```json/,/^```$/' "{task_dir}/trace.md" | jq '.debug_eligible, .failure_t
 #### 1.1 精度取证 (Python 脚本, 不可跳过)
 
 ```bash
-python3 skills/ascendc/precision-tuning/scripts/precision_forensics.py \
+python3 skills/ascendc/ascendc-debug/scripts/precision_forensics.py \
     {task_name} --attempt {attempt}
 ```
 
 Gate 验证:
 ```bash
-python3 skills/ascendc/precision-tuning/scripts/precision_gate.py \
+python3 skills/ascendc/ascendc-debug/scripts/precision_gate.py \
     --step forensics --op-name {op_name} --task-name {task_name} --attempt {attempt}
 ```
 
@@ -174,7 +174,7 @@ python3 skills/ascendc/precision-tuning/scripts/precision_gate.py \
 4. 修改 `{task_dir}/kernel/*.cpp` / `*.h`（**绝对不动** `utils/build_ascendc.py` / `CMakeLists.txt` / `setup.py` / `utils/` 下任何文件）
 5. 通过 Gate-通用 + Gate-BUILD-A 验证：
    ```bash
-   python3 skills/ascendc/precision-tuning/scripts/precision_gate.py \
+   python3 skills/ascendc/ascendc-debug/scripts/precision_gate.py \
        --step audit --op-name {op_name} --task-name {task_name} --attempt {attempt}
    ```
 
@@ -218,7 +218,7 @@ python3 skills/ascendc/precision-tuning/scripts/precision_gate.py \
 
 **推荐参考资料**:
 - `skills/ascendc/ascendc-translator/references/dsl2Ascendc_host.md`（pybind 绑定规范）
-- `skills/ascendc/precision-tuning/references/`（若有环境变量 / pybind 相关条目）
+- `skills/ascendc/ascendc-debug/references/`（若有环境变量 / pybind 相关条目）
 - `skills/ascendc/ascendc-translator/references/TileLang-AscendC-API-Mapping.md`（`extern "C"` 导出规范）
 
 **Step 4（共用）**: 修复后调 `utils/eval_wrapper.py --phase 8 --attempt {attempt} --task-dir {task_dir}` 重跑，然后走 `Gate-IMPORT-V`：
@@ -415,8 +415,8 @@ cat "{task_dir}/precision_tuning/round_summary_{N}.json"
 
 从 `[FORENSICS_SUMMARY]` 中提取 `primary_hint` 和 `op_type`, 检索相关知识条目:
 ```bash
-python3 skills/ascendc/precision-tuning/scripts/precision_knowledge.py search \
-    --kb-path skills/ascendc/precision-tuning/references/precision_knowledge_base.json \
+python3 skills/ascendc/ascendc-debug/scripts/precision_knowledge.py search \
+    --kb-path skills/ascendc/ascendc-debug/references/precision_knowledge_base.json \
     --op-type <L8_operator.op_type> \
     --pattern <primary_hint> \
     --top-k 3 \
@@ -650,8 +650,8 @@ python3 skills/ascendc/precision-tuning/scripts/precision_knowledge.py search \
 - 若无明显位置特征 → 不传 `--position`
 
 ```bash
-python3 skills/ascendc/precision-tuning/scripts/precision_knowledge.py search \
-    --kb-path skills/ascendc/precision-tuning/references/precision_knowledge_base.json \
+python3 skills/ascendc/ascendc-debug/scripts/precision_knowledge.py search \
+    --kb-path skills/ascendc/ascendc-debug/references/precision_knowledge_base.json \
     --op-type <L8_operator.op_type> \
     --pattern <primary_hint> \
     --position <tail/boundary/scattered 或不传> \
@@ -727,7 +727,7 @@ python3 skills/ascendc/precision-tuning/scripts/precision_knowledge.py search \
 
 Gate 验证:
 ```bash
-python3 skills/ascendc/precision-tuning/scripts/precision_gate.py \
+python3 skills/ascendc/ascendc-debug/scripts/precision_gate.py \
     --step audit --op-name {op_name} --task-name {task_name} --attempt {attempt}
 ```
 
@@ -749,7 +749,7 @@ python3 skills/ascendc/precision-tuning/scripts/precision_gate.py \
 
 修复完成后, Gate 验证代码文件完整性:
 ```bash
-python3 skills/ascendc/precision-tuning/scripts/precision_gate.py \
+python3 skills/ascendc/ascendc-debug/scripts/precision_gate.py \
     --step fix --op-name {op_name} --task-name {task_name} --attempt {attempt}
 ```
 
@@ -804,7 +804,7 @@ bash skills/ascendc/ascendc-translator/references/evaluate_ascendc.sh {task_name
 
 **Gate 验证 + 循环控制:**
 ```bash
-python3 skills/ascendc/precision-tuning/scripts/precision_gate.py \
+python3 skills/ascendc/ascendc-debug/scripts/precision_gate.py \
     --step validate --op-name {op_name} --task-name {task_name} --attempt {attempt}
 ```
 
@@ -1048,8 +1048,8 @@ echo "精度通过，current_best 已更新为 100.0"
 
 **5.3 写入知识库 (Python 执行):**
 ```bash
-python3 skills/ascendc/precision-tuning/scripts/precision_knowledge.py dump \
-    --kb-path skills/ascendc/precision-tuning/references/precision_knowledge_base.json \
+python3 skills/ascendc/ascendc-debug/scripts/precision_knowledge.py dump \
+    --kb-path skills/ascendc/ascendc-debug/references/precision_knowledge_base.json \
     --task-name {task_name} \
     --op-name {op_name}
 ```

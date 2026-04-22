@@ -109,9 +109,9 @@ argument-hint: >
 ### 输入来源
 
 1. **`{task_dir}/.eval_status/latest.json`**（eval_wrapper 产出，唯一事实源）
-   - 读取方式：调用 `skills/ascendc/precision-tuning/scripts/eval_status.py`
+   - 读取方式：调用 `skills/ascendc/ascendc-debug/scripts/eval_status.py`
      ```bash
-     python3 skills/ascendc/precision-tuning/scripts/eval_status.py \
+     python3 skills/ascendc/ascendc-debug/scripts/eval_status.py \
          --task-dir {task_dir} --summarize
      ```
    - 该脚本对外 API：`load_latest_status(task_dir)` 返回已校验的 dict；`summarize_for_trace(status)` 返回 `failure_type` / `import_subtype` / `abort_subtype` / `last_evaluate_phase` / `last_evaluate_attempt` / `failed_step` 等字段子集。

@@ -4,7 +4,7 @@
 
 **Goal:** 把 AscendC 所有可自动修复的失败类型（build/import/runtime/timeout/precision）的 debug 工作从主 agent 循环抽出来交给 subagent 处理；主 agent 负责生成 + 初筛 + 归档。
 
-**Architecture:** 新增 `utils/eval_wrapper.py` 作为 evaluate_ascendc 唯一机器可读事实源；把 `skills/ascendc/precision-tuning/scripts/precision_gate.py` 从精度硬编码重构成"通用层 + 分支层"双层 Gate；新建 `agents/ascend-kernel-developer-with-ascendc-debug.md` 主 agent，在 Phase 8 条件性 spawn `precision-tuning-discovery` subagent；subagent SKILL.md 扩成 5 条 Step 1 分支（P/B/I/R/T），结束时自包含地产出 `debug_trace.md` + `debug_status.json`。
+**Architecture:** 新增 `utils/eval_wrapper.py` 作为 evaluate_ascendc 唯一机器可读事实源；把 `skills/ascendc/ascendc-debug/scripts/precision_gate.py` 从精度硬编码重构成"通用层 + 分支层"双层 Gate；新建 `agents/ascend-kernel-developer-with-ascendc-debug.md` 主 agent，在 Phase 8 条件性 spawn `ascendc-debug-agent-discovery` subagent；subagent SKILL.md 扩成 5 条 Step 1 分支（P/B/I/R/T），结束时自包含地产出 `debug_trace.md` + `debug_status.json`。
 
 **Tech Stack:** Python 3（eval_wrapper、eval_status、gates、tests）、Bash、Markdown（agent / skill / trace 文档）、`subprocess` / `signal` / `json` / `re` 标准库。
 
@@ -46,7 +46,7 @@ Stream G  Stream H   Stream I     Stream J
 
 - **工作目录**: 本仓库根 `/Users/junming/code/operator/AscendOpGenAgent`（本地编辑），远端 `/home/c00959374/AscendOpGenAgent`（通过 `ssh npu_server` + 容器 `cjm_cann1` 执行）。
 - **编辑规则**（来自 CLAUDE.md Code Sync）：**只在本地编辑**，`git commit && git push`，然后在远端 `git fetch && git pull` 后再执行。
-- **测试约定**: 本仓库无 pytest 框架；沿用现有 `skills/ascendc/precision-tuning/scripts/test_executor_parity.py` 的 stdlib unittest 风格。新测试放到 `skills/ascendc/precision-tuning/scripts/tests/`，均可 `python3 -m unittest <file>` 独立运行。
+- **测试约定**: 本仓库无 pytest 框架；沿用现有 `skills/ascendc/ascendc-debug/scripts/test_executor_parity.py` 的 stdlib unittest 风格。新测试放到 `skills/ascendc/ascendc-debug/scripts/tests/`，均可 `python3 -m unittest <file>` 独立运行。
 - **commit 粒度**: 每个 Task 结束后单独 commit（除非 Task 明确合并）。message 用 `feat: / fix: / refactor: / docs: / test:` 前缀。
 - **分支**: 当前 `cjm/debug-v2`，所有改动都在此分支。
 - **反作弊不变量**: 任何时候 `model_new_ascendc.py` / `model_new_tilelang.py` / `model.py` 都禁止改。新增 subagent 分支 Gate 同样硬约束只改 `kernel/`。
@@ -454,7 +454,7 @@ git commit -m "feat(eval_wrapper): implement classify_failure with 10-case unit 
 ## Task F3: 新建 `eval_status.py` loader
 
 **Files:**
-- Create: `skills/ascendc/precision-tuning/scripts/eval_status.py`
+- Create: `skills/ascendc/ascendc-debug/scripts/eval_status.py`
 
 **Context:** 给下游 Gate / trace-recorder / subagent 提供统一读取接口。（findings.md §3.4）
 
@@ -538,9 +538,9 @@ if __name__ == "__main__":
 
 Run:
 ```bash
-cd /Users/junming/code/operator/AscendOpGenAgent && python3 -c "import ast; ast.parse(open('skills/ascendc/precision-tuning/scripts/eval_status.py').read()); print('ok')"
-git add skills/ascendc/precision-tuning/scripts/eval_status.py
-git commit -m "feat(precision-tuning): add eval_status.py loader/validator"
+cd /Users/junming/code/operator/AscendOpGenAgent && python3 -c "import ast; ast.parse(open('skills/ascendc/ascendc-debug/scripts/eval_status.py').read()); print('ok')"
+git add skills/ascendc/ascendc-debug/scripts/eval_status.py
+git commit -m "feat(ascendc-debug-agent): add eval_status.py loader/validator"
 ```
 
 ---
@@ -550,7 +550,7 @@ git commit -m "feat(precision-tuning): add eval_status.py loader/validator"
 ## Task G1: 建立 `gates/` 包
 
 **Files:**
-- Create: `skills/ascendc/precision-tuning/scripts/gates/__init__.py`
+- Create: `skills/ascendc/ascendc-debug/scripts/gates/__init__.py`
 
 **Step 1: 写入 `__init__.py`**
 
@@ -568,7 +568,7 @@ git commit -m "feat(precision-tuning): add eval_status.py loader/validator"
 
 **Step 2: Commit**
 ```bash
-git add skills/ascendc/precision-tuning/scripts/gates/__init__.py
+git add skills/ascendc/ascendc-debug/scripts/gates/__init__.py
 git commit -m "refactor(gates): create gates package"
 ```
 
@@ -577,7 +577,7 @@ git commit -m "refactor(gates): create gates package"
 ## Task G2: `gates/common.py` — 通用层
 
 **Files:**
-- Create: `skills/ascendc/precision-tuning/scripts/gates/common.py`
+- Create: `skills/ascendc/ascendc-debug/scripts/gates/common.py`
 
 **Context:** 通用层只做**所有分支都成立的不变量**：反作弊 hash、AST 退化、文件存在、`eval_status` 产出、baseline、目录完整性。**不强制 audit section schema**（避免和精度现有 `[FORENSICS_SUMMARY]+[REFERENCE_IMPL_SPEC]` 打架——findings.md §3.3 ②, §7.6）。
 
@@ -705,7 +705,7 @@ def run_common(step: str, task_dir: Path, op_name: str, attempt: int) -> GateOut
 
 **Step 2: Commit**
 ```bash
-git add skills/ascendc/precision-tuning/scripts/gates/common.py
+git add skills/ascendc/ascendc-debug/scripts/gates/common.py
 git commit -m "feat(gates): add common layer (anticheat/ast/structure/eval_status/audit-file)"
 ```
 
@@ -714,8 +714,8 @@ git commit -m "feat(gates): add common layer (anticheat/ast/structure/eval_statu
 ## Task G3: `gates/branch_precision.py` — 从原 `precision_gate.py` 抽精度逻辑
 
 **Files:**
-- Modify: 读 `skills/ascendc/precision-tuning/scripts/precision_gate.py`（不改，抽走精度语义）
-- Create: `skills/ascendc/precision-tuning/scripts/gates/branch_precision.py`
+- Modify: 读 `skills/ascendc/ascendc-debug/scripts/precision_gate.py`（不改，抽走精度语义）
+- Create: `skills/ascendc/ascendc-debug/scripts/gates/branch_precision.py`
 
 **Context:** findings.md §3.3 ③。精度分支原有 audit section（`[FORENSICS_SUMMARY]` / `[REFERENCE_IMPL_SPEC]` / `[ROOT_CAUSE]` / `[FIX_PLAN]` 等 7 个）不改，`mismatch_ratio` / `max_abs_diff` 趋势、`loop_signal` 计算照搬。本 Task 的目标是**语义 1:1 搬移**，不做功能新增；原 `precision_gate.py` 的方法会在 Task G9（Router 重构）改成"通用 + 精度分支"的派发方式。
 
@@ -752,7 +752,7 @@ git commit -m "feat(gates): add common layer (anticheat/ast/structure/eval_statu
 import unittest
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "ascendc" / "precision-tuning" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "ascendc" / "ascendc-debug-agent" / "scripts"))
 
 
 class ImportableOnly(unittest.TestCase):
@@ -767,7 +767,7 @@ if __name__ == "__main__":
 
 **Step 4: Commit**
 ```bash
-git add skills/ascendc/precision-tuning/scripts/gates/branch_precision.py utils/tests/test_branch_precision_parity.py
+git add skills/ascendc/ascendc-debug/scripts/gates/branch_precision.py utils/tests/test_branch_precision_parity.py
 git commit -m "feat(gates): extract precision logic into gates/branch_precision (no behavior change)"
 ```
 
@@ -776,7 +776,7 @@ git commit -m "feat(gates): extract precision logic into gates/branch_precision 
 ## Task G4: `gates/branch_build.py` — 新增
 
 **Files:**
-- Create: `skills/ascendc/precision-tuning/scripts/gates/branch_build.py`
+- Create: `skills/ascendc/ascendc-debug/scripts/gates/branch_build.py`
 
 **Context:** findings.md §3.3 ④。新分支，处理 `failure_type == build_failed`。
 
@@ -860,7 +860,7 @@ class BuildBranch:
 
 **Step 2: Commit**
 ```bash
-git add skills/ascendc/precision-tuning/scripts/gates/branch_build.py
+git add skills/ascendc/ascendc-debug/scripts/gates/branch_build.py
 git commit -m "feat(gates): add build failure branch (Gate-F/A/V)"
 ```
 
@@ -869,7 +869,7 @@ git commit -m "feat(gates): add build failure branch (Gate-F/A/V)"
 ## Task G5: `gates/branch_import.py` — kernel_side only
 
 **Files:**
-- Create: `skills/ascendc/precision-tuning/scripts/gates/branch_import.py`
+- Create: `skills/ascendc/ascendc-debug/scripts/gates/branch_import.py`
 
 **Context:** findings.md §3.3 ⑤。只处理 `import_kernel_side`。env_side 在主 agent Phase 7 已过滤掉；若异常进入，Gate-F 直接 reject。
 
@@ -942,7 +942,7 @@ class ImportBranch:
 
 **Step 2: Commit**
 ```bash
-git add skills/ascendc/precision-tuning/scripts/gates/branch_import.py
+git add skills/ascendc/ascendc-debug/scripts/gates/branch_import.py
 git commit -m "feat(gates): add import failure branch (kernel_side only)"
 ```
 
@@ -951,7 +951,7 @@ git commit -m "feat(gates): add import failure branch (kernel_side only)"
 ## Task G6: `gates/branch_runtime.py`
 
 **Files:**
-- Create: `skills/ascendc/precision-tuning/scripts/gates/branch_runtime.py`
+- Create: `skills/ascendc/ascendc-debug/scripts/gates/branch_runtime.py`
 
 **Step 1: 实现**
 
@@ -1013,7 +1013,7 @@ class RuntimeBranch:
 
 **Step 2: Commit**
 ```bash
-git add skills/ascendc/precision-tuning/scripts/gates/branch_runtime.py
+git add skills/ascendc/ascendc-debug/scripts/gates/branch_runtime.py
 git commit -m "feat(gates): add runtime crash branch"
 ```
 
@@ -1022,7 +1022,7 @@ git commit -m "feat(gates): add runtime crash branch"
 ## Task G7: `gates/branch_timeout.py`
 
 **Files:**
-- Create: `skills/ascendc/precision-tuning/scripts/gates/branch_timeout.py`
+- Create: `skills/ascendc/ascendc-debug/scripts/gates/branch_timeout.py`
 
 **Step 1: 实现**
 
@@ -1080,7 +1080,7 @@ class TimeoutBranch:
 
 **Step 2: Commit**
 ```bash
-git add skills/ascendc/precision-tuning/scripts/gates/branch_timeout.py
+git add skills/ascendc/ascendc-debug/scripts/gates/branch_timeout.py
 git commit -m "feat(gates): add timeout branch"
 ```
 
@@ -1089,7 +1089,7 @@ git commit -m "feat(gates): add timeout branch"
 ## Task G8: 把 `precision_gate.py` 改成路由器
 
 **Files:**
-- Modify: `skills/ascendc/precision-tuning/scripts/precision_gate.py`
+- Modify: `skills/ascendc/ascendc-debug/scripts/precision_gate.py`
 
 **Context:** findings.md §3.3 ①。保持原有 CLI（`--step forensics|audit|fix|validate --op-name --task-name --attempt`）向后兼容——对"未带 `failure_type`"的旧调用默认按 `precision_failed` 分支处理。
 
@@ -1175,20 +1175,20 @@ def main():
 Run:
 ```bash
 cd /Users/junming/code/operator/AscendOpGenAgent
-python3 -c "from skills.ascendc.precision-tuning.scripts.gates import common, branch_precision, branch_build, branch_import, branch_runtime, branch_timeout; print('imports ok')" 2>/dev/null || \
-  PYTHONPATH=skills/ascendc/precision-tuning/scripts python3 -c "from gates import common, branch_precision, branch_build, branch_import, branch_runtime, branch_timeout; print('imports ok')"
+python3 -c "from skills.ascendc.ascendc-debug-agent.scripts.gates import common, branch_precision, branch_build, branch_import, branch_runtime, branch_timeout; print('imports ok')" 2>/dev/null || \
+  PYTHONPATH=skills/ascendc/ascendc-debug/scripts python3 -c "from gates import common, branch_precision, branch_build, branch_import, branch_runtime, branch_timeout; print('imports ok')"
 ```
 Expected: `imports ok`
 
 ```bash
 cd /Users/junming/code/operator/AscendOpGenAgent
-python3 skills/ascendc/precision-tuning/scripts/precision_gate.py --help
+python3 skills/ascendc/ascendc-debug/scripts/precision_gate.py --help
 ```
 Expected: 显示 argparse help，不报 import error
 
 **Step 4: Commit**
 ```bash
-git add skills/ascendc/precision-tuning/scripts/precision_gate.py
+git add skills/ascendc/ascendc-debug/scripts/precision_gate.py
 git commit -m "refactor(precision_gate): convert into 2-layer router (common + branch_*)"
 ```
 
@@ -1197,8 +1197,8 @@ git commit -m "refactor(precision_gate): convert into 2-layer router (common + b
 ## Task G9: PrecisionBranch 适配 + 清理
 
 **Files:**
-- Modify: `skills/ascendc/precision-tuning/scripts/gates/branch_precision.py`
-- Modify: `skills/ascendc/precision-tuning/scripts/precision_gate.py`（只清理死代码）
+- Modify: `skills/ascendc/ascendc-debug/scripts/gates/branch_precision.py`
+- Modify: `skills/ascendc/ascendc-debug/scripts/precision_gate.py`（只清理死代码）
 
 **Step 1:** 在 PrecisionBranch 里包装 legacy `GateChecker`，确保 `run_gate_f/a/v` 签名统一。
 
@@ -1214,12 +1214,12 @@ git commit -m "refactor(precision_gate): drop migrated legacy code, keep REPO_RO
 
 ---
 
-# STREAM H — precision-tuning SKILL.md 重写 (并行，依赖 F3)
+# STREAM H — ascendc-debug-agent SKILL.md 重写 (并行，依赖 F3)
 
 ## Task H1: frontmatter 改 timeout 3600 → 5400
 
 **Files:**
-- Modify: `skills/ascendc/precision-tuning/SKILL.md:6-14`
+- Modify: `skills/ascendc/ascendc-debug/SKILL.md:6-14`
 
 ```diff
  subagent:
@@ -1239,14 +1239,14 @@ git commit -m "refactor(precision_gate): drop migrated legacy code, keep REPO_RO
    max_iterations: 60
 ```
 
-Commit: `docs(precision-tuning): bump subagent timeout to 5400s + update reason`
+Commit: `docs(ascendc-debug-agent): bump subagent timeout to 5400s + update reason`
 
 ---
 
 ## Task H2: "What I do" / "When to use me" / "Prerequisites"
 
 **Files:**
-- Modify: `skills/ascendc/precision-tuning/SKILL.md:17-41`
+- Modify: `skills/ascendc/ascendc-debug/SKILL.md:17-41`
 
 重写成：
 
@@ -1275,14 +1275,14 @@ Commit: `docs(precision-tuning): bump subagent timeout to 5400s + update reason`
 其中 `task_dir = {repo_root}/{task_name}`。
 ```
 
-Commit: `docs(precision-tuning): broaden scope to 5 failure categories`
+Commit: `docs(ascendc-debug-agent): broaden scope to 5 failure categories`
 
 ---
 
 ## Task H3: 新增 Step 0.3（分流 + session_branch 锁定）
 
 **Files:**
-- Modify: `skills/ascendc/precision-tuning/SKILL.md`（在 Step 0.2 之后、Step 1 之前插入 Step 0.3）
+- Modify: `skills/ascendc/ascendc-debug/SKILL.md`（在 Step 0.2 之后、Step 1 之前插入 Step 0.3）
 
 新段落内容（原文复制 findings.md §3.2.4）：
 
@@ -1290,7 +1290,7 @@ Commit: `docs(precision-tuning): broaden scope to 5 failure categories`
 ### Step 0.3: 读 final_status + eval_status，锁定 session_branch
 
 ```bash
-python3 skills/ascendc/precision-tuning/scripts/eval_status.py \
+python3 skills/ascendc/ascendc-debug/scripts/eval_status.py \
     --task-dir {task_dir} | jq '.failure_type,.import_subtype'
 awk '/^```json/,/^```$/' "{task_dir}/trace.md" | jq '.debug_eligible, .failure_type'
 ```
@@ -1317,14 +1317,14 @@ awk '/^```json/,/^```$/' "{task_dir}/trace.md" | jq '.debug_eligible, .failure_t
 | — | 其他 | 写 debug_status skipped_unsupported_type, 退出 |
 ```
 
-Commit: `docs(precision-tuning): add Step 0.3 branch dispatch with session_branch lock`
+Commit: `docs(ascendc-debug-agent): add Step 0.3 branch dispatch with session_branch lock`
 
 ---
 
 ## Task H4: 新增 Step 1-B (Build)
 
 **Files:**
-- Modify: `skills/ascendc/precision-tuning/SKILL.md`（在 Step 1 之后，作为 Step 1 的平级分支；原 Step 1 重命名为 Step 1-P）
+- Modify: `skills/ascendc/ascendc-debug/SKILL.md`（在 Step 1 之后，作为 Step 1 的平级分支；原 Step 1 重命名为 Step 1-P）
 
 **Step 1: 原 Step 1 重命名**（只改标题）：`### Step 1: 精度取证` → `### Step 1-P: 精度取证（precision_failed 分支）`
 
@@ -1352,7 +1352,7 @@ Step 1-B 示例：
 4. 修复 `kernel/*.cpp` / `*.h`
 5. 通过 Gate-通用 + Gate-BUILD-A 验证：
    ```bash
-   python3 skills/ascendc/precision-tuning/scripts/precision_gate.py \
+   python3 skills/ascendc/ascendc-debug/scripts/precision_gate.py \
        --step audit --op-name {op_name} --task-name {task_name} --attempt {attempt}
    ```
 
@@ -1363,14 +1363,14 @@ Step 1-B 示例：
 
 **Step 3: Step 1-I / 1-R / 1-T 按同样模板写入**（findings.md §3.2.5 给出分支专属 section 名称：`[IMPORT_TRACEBACK_CITATION]` / `[RUNTIME_ERROR_CITATION]` / `[SYNC_POINT_ANALYSIS]`）。
 
-Commit: `docs(precision-tuning): add Step 1-B/I/R/T branches (build/import/runtime/timeout)`
+Commit: `docs(ascendc-debug-agent): add Step 1-B/I/R/T branches (build/import/runtime/timeout)`
 
 ---
 
 ## Task H5: Step 5 结束时写 `debug_trace.md` + `debug_status.json`
 
 **Files:**
-- Modify: `skills/ascendc/precision-tuning/SKILL.md`（在 Step 5 "成功收尾"之前插入 Step 5-pre：subagent 退出前必写两份产物；在 Step 6 "失败报告" 同样处插入）
+- Modify: `skills/ascendc/ascendc-debug/SKILL.md`（在 Step 5 "成功收尾"之前插入 Step 5-pre：subagent 退出前必写两份产物；在 Step 6 "失败报告" 同样处插入）
 
 **内容**（原文复制 findings.md §3.2.6 + §2.4/§8.4 中 `debug_status.json` 的 schema）：
 
@@ -1402,30 +1402,30 @@ Commit: `docs(precision-tuning): add Step 1-B/I/R/T branches (build/import/runti
 > **不 append `trace.md`**。`trace.md` 在 Phase 7 写完后全程只读（findings.md §2.4 / §7.3）。
 ```
 
-Commit: `docs(precision-tuning): require debug_trace.md + debug_status.json at exit`
+Commit: `docs(ascendc-debug-agent): require debug_trace.md + debug_status.json at exit`
 
 ---
 
 ## Task H6: 更新 README.md / STRUCTURE.md 反映 gates/ 目录
 
 **Files:**
-- Modify: `skills/ascendc/precision-tuning/README.md`
-- Modify: `skills/ascendc/precision-tuning/STRUCTURE.md`
+- Modify: `skills/ascendc/ascendc-debug/README.md`
+- Modify: `skills/ascendc/ascendc-debug/STRUCTURE.md`
 
 补充 `gates/` 子目录的说明（参考 findings.md §3.1 的文件结构图）。
 
-Commit: `docs(precision-tuning): update README/STRUCTURE to reflect gates/ package`
+Commit: `docs(ascendc-debug-agent): update README/STRUCTURE to reflect gates/ package`
 
 ---
 
 # STREAM I — Subagent agent file (并行，依赖 F3)
 
-## Task I1: 修改 `agents/precision-tuning-discovery.md`
+## Task I1: 修改 `agents/ascendc-debug-agent-discovery.md`
 
 **Files:**
-- Modify: `agents/precision-tuning-discovery.md:3`（description）
-- Modify: `agents/precision-tuning-discovery.md:16-22`（argument-hint / 前提）
-- Modify: `agents/precision-tuning-discovery.md:33-40`（Role Definition）
+- Modify: `agents/ascendc-debug-agent-discovery.md:3`（description）
+- Modify: `agents/ascendc-debug-agent-discovery.md:16-22`（argument-hint / 前提）
+- Modify: `agents/ascendc-debug-agent-discovery.md:33-40`（Role Definition）
 
 按 findings.md §4 的 3 处 diff：
 
@@ -1464,7 +1464,7 @@ Commit: `docs(precision-tuning): update README/STRUCTURE to reflect gates/ packa
 
 ④ 反作弊约束保持不变（L96-122）。
 
-Commit: `docs(agent): extend precision-tuning-discovery scope to 5 failure types`
+Commit: `docs(agent): extend ascendc-debug-agent-discovery scope to 5 failure types`
 
 ---
 
@@ -1675,7 +1675,7 @@ Commit: `feat(agent-debug): hand Phase 4 history to trace-recorder via .phase4_h
 
 ### 8.3 Spawn 调用
 
-- subagent_type: `precision-tuning-discovery`
+- subagent_type: `ascendc-debug-agent-discovery`
 - 传入: `{output_dir}` 绝对路径 + npu ID + `failure_type`（冗余确认）
 - timeout: 5400 秒
 
@@ -1780,7 +1780,7 @@ Run（远端）:
 ```bash
 ssh npu_server "cd /home/c00959374/AscendOpGenAgent && git fetch origin && git checkout cjm/debug-v2 && git pull origin cjm/debug-v2"
 ssh npu_server 'docker exec cjm_cann1 bash -c "cd /home/c00959374/AscendOpGenAgent && \
-  python3 skills/ascendc/precision-tuning/scripts/precision_gate.py \
+  python3 skills/ascendc/ascendc-debug/scripts/precision_gate.py \
     --step forensics --op-name rms_norm --task-name archive_tasks/rms_norm --attempt 0"'
 ```
 

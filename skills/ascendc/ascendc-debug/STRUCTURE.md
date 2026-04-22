@@ -1,7 +1,7 @@
-# precision-tuning 目录结构
+# ascendc-debug 目录结构
 
 ```
-skills/ascendc/precision-tuning/
+skills/ascendc/ascendc-debug/
 ├── README.md                          # Skill 说明文档（设计概览、双 Subagent 架构、知识库结构、gates/ 2 层架构）
 ├── SKILL.md                           # Agent 执行手册（Step 0 ~ Step 7，含 Step 0.3 分流 + Step 1-P/B/I/R/T + Step 7 退出前产物）
 ├── STRUCTURE.md                       # 本文件：目录结构示意图
@@ -59,8 +59,8 @@ skills/ascendc/precision-tuning/
 
 | Subagent | 文件位置 | 审计策略 | 特点 |
 |----------|----------|----------|------|
-| **发现式** | `agents/precision-tuning-discovery.md` | 发现式审计 | 直接运用 AscendC 领域知识推理根因，不强制预读参考示例，依赖 Agent 自身知识储备快速诊断 |
-| **构建式** | `agents/precision-tuning.md` | 构建式审计 | 严格遵循 Phase A→B→C：先建规范（强制读取 lowering 示例），再看代码，最后结构化对照 |
+| **发现式** | `agents/ascendc-debug-agent-discovery.md` | 发现式审计 | 直接运用 AscendC 领域知识推理根因，不强制预读参考示例，依赖 Agent 自身知识储备快速诊断 |
+| **构建式** | `agents/ascendc-debug-agent.md` | 构建式审计 | 严格遵循 Phase A→B→C：先建规范（强制读取 lowering 示例），再看代码，最后结构化对照 |
 
 ### 共用组件
 

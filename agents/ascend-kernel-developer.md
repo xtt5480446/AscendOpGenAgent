@@ -86,7 +86,7 @@ Phase 7: Trace 记录         (trace-recorder)
 
 **必须存在的正向信号**：pybind11.cpp 或 host 文件里至少有一处 `<<<...>>>` triple-chevron kernel launch、`aclrtLaunchKernel(...)` 或 `*_do(...)` stub launcher，**否则判 `NO_KERNEL_LAUNCH`**。
 
-**检测时机**：每次生成 / 修改 `kernel/*.cpp` 或 `model_new_ascendc.py` 后，bench 会自动跑 `skills/ascendc/precision-tuning/scripts/anticheat.py verify`，命中即在批量报告标 🚨 CHEAT 并保留 `_anticheat.json` 供审查。**作弊任务不会自动重跑，但会进入人工审查队列**。如果你因平台/API 限制无法实现某算子，请在 Phase 7 trace.md 中如实记录失败原因，不要用 ATen fallback 掩盖。
+**检测时机**：每次生成 / 修改 `kernel/*.cpp` 或 `model_new_ascendc.py` 后，bench 会自动跑 `skills/ascendc/ascendc-debug/scripts/anticheat.py verify`，命中即在批量报告标 🚨 CHEAT 并保留 `_anticheat.json` 供审查。**作弊任务不会自动重跑，但会进入人工审查队列**。如果你因平台/API 限制无法实现某算子，请在 Phase 7 trace.md 中如实记录失败原因，不要用 ATen fallback 掩盖。
 ---
 
 ## Phase 0: 参数确认

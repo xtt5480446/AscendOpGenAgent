@@ -74,7 +74,7 @@ STRING_LITERAL_RE = re.compile(r'"(?:\\.|[^"\\])*"')
 
 
 def repo_root() -> Path:
-    # scripts/ -> precision-tuning/ -> ascendc/ -> skills/ -> <repo_root>
+    # scripts/ -> ascendc-debug/ -> ascendc/ -> skills/ -> <repo_root>
     return Path(__file__).resolve().parents[4]
 
 

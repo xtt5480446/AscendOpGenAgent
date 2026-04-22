@@ -13,9 +13,9 @@
 ```
 AscendOpGenAgent/
 ├── agents/
-│   ├── precision-tuning-discovery.md      # 发现式 Subagent（直接从取证 / 日志数据推理）
-│   └── precision-tuning.md                # 构建式 Subagent（Phase A→B→C 规范化审计）
-└── skills/ascendc/precision-tuning/
+│   ├── ascendc-debug-agent-discovery.md      # 发现式 Subagent（直接从取证 / 日志数据推理）
+│   └── ascendc-debug-agent.md                # 构建式 Subagent（Phase A→B→C 规范化审计）
+└── skills/ascendc/ascendc-debug/
     ├── SKILL.md                           # Skill 执行手册（Step 0 ~ Step 7，含 Step 1-P/B/I/R/T）
     ├── README.md                          # 本文件：设计文档
     ├── STRUCTURE.md                       # 目录结构说明
@@ -52,7 +52,7 @@ AscendOpGenAgent/
   - `utils/eval_wrapper.py` 产出 `{task_dir}/.eval_status/latest.json`（及 `phase{N}_attempt{M}.json` / `.eval_logs/phase{N}_attempt{M}.log`）
 - 下游：
   - 主 agent Phase 8 spawn 后处理读取 `{task_dir}/debug_trace.md` + `{task_dir}/debug_status.json`（本 skill 退出前强制产物）
-  - `utils/verification_ascendc.py`（评测）、`utils/run_precision_tuning.sh`（批量调度 + 反作弊）
+  - `utils/verification_ascendc.py`（评测）、`utils/run_ascendc_debug.sh`（批量调度 + 反作弊）
 
 ## 2 层 Gate 架构
 
@@ -65,7 +65,7 @@ AscendOpGenAgent/
 
 ## 双 Subagent 架构
 
-### 发现式 Subagent (`precision-tuning-discovery`)
+### 发现式 Subagent (`ascendc-debug-agent-discovery`)
 
 **审计策略**: 直接从数值取证数据出发，运用 AscendC 领域知识推理根因。
 
@@ -74,7 +74,7 @@ AscendOpGenAgent/
 - 快速从 diff 模式锁定嫌疑区域
 - 适用场景：Agent 对 AscendC API 规范已有充分了解
 
-### 构建式 Subagent (`precision-tuning`)
+### 构建式 Subagent (`ascendc-debug-agent`)
 
 **审计策略**: 严格遵循 Phase A→B→C 的构建式流程。
 
@@ -109,7 +109,7 @@ AscendOpGenAgent/
 
 精度调优的"作弊"指：通过修改 Python wrapper 或在 kernel C++ 里调用 libtorch 计算 API 来掩盖精度失败，而不是真正修复 AscendC kernel。
 
-**三层检测**（由 `anticheat.py` 实现，`utils/run_precision_tuning.sh` 在每个任务前后自动调用）：
+**三层检测**（由 `anticheat.py` 实现，`utils/run_ascendc_debug.sh` 在每个任务前后自动调用）：
 
 1. **wrapper hash 对比**：调优前 snapshot `model_new_ascendc.py` / `model_new_tilelang.py` 的 sha256，调优后对比；变化 = 作弊（wrapper 本应保持不变）
 2. **Python AST 退化检测**：通过 `skills/ascendc/ascendc-translator/scripts/validate_ascendc_impl.py` 检测 wrapper 4 类退化（无扩展导入 / 未调用 kernel / 混用 torch / 标量 for 循环）
@@ -117,7 +117,7 @@ AscendOpGenAgent/
 
 **违规处理**：恢复 wrapper baseline + 标记 🚨 CHEAT（不重跑，进入人工审查队列）。
 
-**agent 文件**（`agents/precision-tuning{,-discovery}.md`）有"反作弊约束"硬规则章节，明确唯一可改目录为 `kernel/`。
+**agent 文件**（`agents/ascendc-debug-agent{,-discovery}.md`）有"反作弊约束"硬规则章节，明确唯一可改目录为 `kernel/`。
 
 ## 信息层级 (L0-L8)
 

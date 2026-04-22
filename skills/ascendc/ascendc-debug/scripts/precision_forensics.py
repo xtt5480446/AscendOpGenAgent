@@ -35,7 +35,7 @@ import numpy as np
 import torch
 
 SCRIPT_DIR   = Path(__file__).resolve().parent          # scripts/
-SKILL_DIR    = SCRIPT_DIR.parent                        # precision-tuning/
+SKILL_DIR    = SCRIPT_DIR.parent                        # ascendc-debug/
 REPO_ROOT    = SKILL_DIR.parent.parent.parent           # AscendOpGenAgent/
 VERIF_SCRIPT = REPO_ROOT / "utils" / "verification_ascendc.py"
 

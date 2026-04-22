@@ -2,7 +2,7 @@
 
 ## 用途
 
-在 precision-tuning Step 2 的 Sub-step 2.2 中, Agent 需要将算子的参考实现分解为逐步计算链。
+在 ascendc-debug Step 2 的 Sub-step 2.2 中, Agent 需要将算子的参考实现分解为逐步计算链。
 这些示例展示了"正确的分解方式"——每步的粒度、标注内容、精度风险点的分析方法。
 
 ## 使用方法

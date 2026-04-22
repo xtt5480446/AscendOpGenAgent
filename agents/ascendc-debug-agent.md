@@ -1,5 +1,5 @@
 ---
-name: precision-tuning
+name: ascendc-debug-agent
 description: AscendC 算子精度调优 Agent — 修复编译通过但精度测试失败的 AscendC 算子
 temperature: 0.1
 
@@ -11,7 +11,7 @@ tools:
   read: true
 
 skills:
-  - precision-tuning
+  - ascendc-debug
 
 argument-hint: >
   输入格式: "precision tune {task_name} [npu={NPU_ID}]"
@@ -78,7 +78,7 @@ argument-hint: >
 
 ### 4. 基础设施与知识库
 
-- 调用 `skills/ascendc/precision-tuning/scripts/precision_forensics.py` 获取 L0-L8 取证数据
+- 调用 `skills/ascendc/ascendc-debug/scripts/precision_forensics.py` 获取 L0-L8 取证数据
 - Gate 脚本循环控制（forensics → audit → fix → validate，`precision_gate.py`）
 - 精度知识库 RAG 检索（`precision_knowledge.py search`，KB 路径 `references/precision_knowledge_base.json`）
 - 从 `archive_tasks/` 路由参考 kernel 案例用于 Phase A 规范构建
@@ -86,7 +86,7 @@ argument-hint: >
 
 ## Operational Guidelines
 
-完整 Sub-step、Gate 协议细节参见 `skills/ascendc/precision-tuning/SKILL.md`；下方规则为硬约束，SKILL.md 提供展开流程。
+完整 Sub-step、Gate 协议细节参见 `skills/ascendc/ascendc-debug/SKILL.md`；下方规则为硬约束，SKILL.md 提供展开流程。
 
 ### 分工边界
 
@@ -118,7 +118,7 @@ argument-hint: >
 补充要求：
 - 若 `{task_dir}/{op_name}.json.bak` 存在，则当前 `{op_name}.json` 视为精简用例；Agent 在精简用例通过后，**必须**恢复 `.json.bak -> .json` 并再跑一次全量 AscendC 验证
 - 只有“精简用例通过 + 全量用例通过”都满足时，才能判定任务最终成功
-- `run_precision_tuning.sh` 只负责调度 Agent，不负责替 Agent 自动恢复 `.json.bak` 或执行全量验证；该行为必须体现在 Agent/Skill 工作流里
+- `run_ascendc_debug.sh` 只负责调度 Agent，不负责替 Agent 自动恢复 `.json.bak` 或执行全量验证；该行为必须体现在 Agent/Skill 工作流里
 
 ### 工作目录限制
 
@@ -147,7 +147,7 @@ argument-hint: >
 - 不允许标量逐元素 Python `for` 循环代替 kernel
 
 **Bench 端检测机制（你必须知道，否则会被判作弊）**：
-1. **Hash 对比**：`run_precision_tuning.sh` 在 codex 启动前保存 `model_new_ascendc.py` / `model_new_tilelang.py` 的 sha256 基线，结束后对比；**hash 变化 = 作弊**
+1. **Hash 对比**：`run_ascendc_debug.sh` 在 codex 启动前保存 `model_new_ascendc.py` / `model_new_tilelang.py` 的 sha256 基线，结束后对比；**hash 变化 = 作弊**
 2. **AST 退化检测**：调用 `skills/ascendc/ascendc-translator/scripts/validate_ascendc_impl.py` 检测 4 类退化（无扩展导入 / 未调用 kernel / 部分用 torch / 标量 for 循环）；**任一命中 = 作弊**
 
 **违规后果**：

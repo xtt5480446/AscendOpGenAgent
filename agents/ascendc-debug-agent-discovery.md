@@ -1,5 +1,5 @@
 ---
-name: precision-tuning-discovery
+name: ascendc-debug-agent-discovery
 description: AscendC kernel debug Agent（发现式审计，覆盖 build/import/runtime/timeout/precision 五类失败）
 temperature: 0.1
 
@@ -11,7 +11,7 @@ tools:
   read: true
 
 skills:
-  - precision-tuning
+  - ascendc-debug
 
 argument-hint: >
   输入格式: "debug ascendc {task_name} [npu={NPU_ID}] [failure_type=<类型>]"
@@ -117,7 +117,7 @@ argument-hint: >
 - 不允许标量逐元素 Python `for` 循环代替 kernel
 
 **Bench 端检测机制（你必须知道，否则会被判作弊）**:
-1. **Hash 对比**: `run_precision_tuning.sh` 在 codex 启动前保存 `model_new_ascendc.py` / `model_new_tilelang.py` 的 sha256 基线，结束后对比；**hash 变化 = 作弊**
+1. **Hash 对比**: `run_ascendc_debug.sh` 在 codex 启动前保存 `model_new_ascendc.py` / `model_new_tilelang.py` 的 sha256 基线，结束后对比；**hash 变化 = 作弊**
 2. **AST 退化检测**: 调用 `skills/ascendc/ascendc-translator/scripts/validate_ascendc_impl.py` 检测 4 类退化（无扩展导入 / 未调用 kernel / 部分用 torch / 标量 for 循环）；**任一命中 = 作弊**
 
 **违规后果**:
