@@ -92,7 +92,48 @@ cp "{task_dir}/model_new_ascendc.py" \
 
 ---
 
-### Step 1: 精度取证
+### Step 0.3: 读 final_status + eval_status，锁定 session_branch
+
+```bash
+# 读结构化 eval_status（最后一次 evaluate 的 failure_type / failed_step / log 路径）
+python3 skills/ascendc/precision-tuning/scripts/eval_status.py \
+    --task-dir {task_dir} | jq '.failure_type, .import_subtype, .timeout_marker_present'
+
+# 读 trace.md 末尾的 final_status JSON block（Phase 7 写入, 本 session 期间只读）
+awk '/^```json/,/^```$/' "{task_dir}/trace.md" | jq '.debug_eligible, .failure_type, .import_subtype'
+```
+
+**分支选择规则（本 session 唯一锁定，不可切换）**：
+
+- 入口按 `final_status.failure_type` 选定 `session_branch`
+- `session_branch` 在整个 subagent session 中**只锁定一次**，之后 Step 1 / 2 / 3 / 4 / 5 / 6 都基于这条分支的 Gate 语义执行
+- `import_failed` 还要读 `final_status.import_subtype`：
+  - `import_kernel_side` → 进入 Step 1-I
+  - `import_env_side` → 异常情况（主 agent 已过滤）；直接写 `debug_trace.md` + `debug_status.json` 标 `phase8_outcome: skipped_env_issue` 后退出
+
+**跨分支跳转禁止（v3 硬约束）**：
+
+- 若某轮修复后 `eval_status.failure_type` 变化（如 `build_failed` → `precision_failed`），视为"本分支 Gate-V 取得进展"
+- **不切换分支**，本次 session 结束；`debug_trace.md` / `debug_status.json` 标 `phase8_outcome: progressed_to_new_failure_type`
+- 主 agent 本版本**不自动二次 spawn**（留给人工判断）
+- 原因：跨分支会导致 audit schema、Gate 语义、`debug_trace.md` 模板同时漂移，风险远大于收益
+
+**根据 `session_branch` 选择 Step 1 分支**：
+
+| session_branch | failure_type | 进入 |
+|---|---|---|
+| `1-P` | `precision_failed` | Step 1-P（现有精度取证路径） |
+| `1-B` | `build_failed` | Step 1-B |
+| `1-I` | `import_failed` + `import_kernel_side` | Step 1-I |
+| `1-R` | `runtime_error` | Step 1-R |
+| `1-T` | `timeout` | Step 1-T |
+| — | 其他（`success` / `degraded` / `no_kernel` / `tilelang_only_failed` / `execution_aborted` / `import_env_side`） | 写 `debug_status.json` 标 `skipped_unsupported_type`，退出 |
+
+> **硬约束重申**：`trace.md` 在 Phase 7 写完后**全程只读**。本 skill 所有产出（`debug_trace.md` / `debug_status.json` / `.eval_status/phase8_*` / `precision_tuning/*`）都写到 `{task_dir}` 下独立文件，**禁止 append `trace.md`**（findings §7.3）。
+
+---
+
+### Step 1-P: 精度取证（precision_failed 分支）
 
 #### 1.1 精度取证 (Python 脚本, 不可跳过)
 
