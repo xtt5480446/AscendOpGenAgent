@@ -678,7 +678,9 @@ awk '/^```json/,/^```$/' "{output_dir}/trace.md" \
 | Phase 4 | AscendC 退化检测失败 | 标记 A-AscendCFallback-Type{N}，不执行功能验证，消耗迭代次数修复 |
 | Phase 4 | AscendC 验证失败 | 最多 3 次迭代，失败后报告状态 |
 | Phase 4 | B 类环境错误 | 立即终止，任务失败 |
-| Phase 6 | 全量验证失败 | 记录结果，不修复，继续 Phase 7 |
+| Phase 6 | 全量验证失败 | 记录结果到 `.eval_status/phase6_attempt0.json`，**不修复**，继续 Phase 7；失败修复由 Phase 8 subagent 接手 |
+| Phase 7 | trace-recorder 未产 final_status block | 日志警告但不阻断；Phase 8 按 `debug_eligible=false` 默认跳过 |
+| Phase 8 | subagent timeout / 缺产物 | 主 agent 兜底写 `debug_status.json`（`phase8_outcome = timeout/crashed/missing_artifacts`），不重试，不 append trace.md |
 | Phase 7 | Trace 记录失败 | 不影响主流程，仅记录失败状态 |
 
 ### Conductor 错误分类
@@ -697,12 +699,16 @@ awk '/^```json/,/^```$/' "{output_dir}/trace.md" \
 
 | 约束 | 说明 |
 |------|------|
-| Phase 4 最大迭代 | 3 次，禁止超出 |
-| 禁止 PyTorch 退化 | model_new_*.py 中禁止 torch.* 计算操作 |
-| 退化检测前置 | 每次生成/修改 model_new_tilelang.py 或 model_new_ascendc.py 后，必须先通过退化检测脚本，再执行功能验证 |
+| Phase 4 最大迭代 | **2 次**，禁止超出（v3：从 3 下调，深度 debug 由 Phase 8 subagent 接手） |
+| Phase 6 修复 | **禁止**（v3：只读全量验证，不修复，不重试） |
+| Phase 7 trace.md | Phase 7 写完后**全程只读**，主 agent 绝不 append |
+| Phase 8 subagent timeout | **5400s**（1.5h），超时/异常不重试，主 agent 兜底写 `debug_status.json` |
+| Phase 8 spawn 条件 | 只在 `trace.md.final_status.debug_eligible == true` 时 spawn `precision-tuning-discovery` |
+| 禁止 PyTorch 退化 | `model_new_*.py` 中禁止 `torch.*` 计算操作 |
+| 退化检测前置 | 每次生成/修改 `model_new_tilelang.py` 或 `model_new_ascendc.py` 后，必须先通过退化检测脚本，再执行功能验证 |
 | A 类连续上限 | 同一退化子类型连续 ≥ 3 次 → 自动终止 |
 | 文件操作范围 | 限制在 `{output_dir}/` 目录内 |
-| 验证方式 | 各 Phase 使用对应 Skill 自带的 `@references/` 工具 |
+| 验证方式 | Phase 4/6 通过 `utils/eval_wrapper.py` 驱动 `evaluate_ascendc.sh`，产出机器可读 `.eval_status/*.json` |
 | NPU 设备 | 通过 `ASCEND_RT_VISIBLE_DEVICES` 环境变量设置 |
 | 语言 | 思考、分析、日志使用中文；代码、路径使用英文 |
 
