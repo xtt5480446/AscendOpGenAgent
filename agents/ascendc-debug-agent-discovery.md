@@ -74,12 +74,12 @@ argument-hint: >
 
 ### 4. 非精度分支诊断逻辑（build / import_kernel_side / runtime / timeout）
 
-- **build_failed**: 读 `.eval_logs/phase{N}_attempt{M}.log` compile error 块（含 `error: ` / `fatal error:` / `undefined reference` / `template instantiation` 等模式），对照 `dsl2Ascendc_compute_vector.md` / `dsl2Ascendc_compute_scalar.md` / `dsl2Ascendc_host.md` / `TileLang-AscendC-API-Mapping.md` 核对 API 签名 / 模板参数 / include 依赖。audit 必填 `[COMPILE_ERROR_CITATION]` `[ROOT_CAUSE]` `[FIX_PLAN]`，`[FIX_TYPE]` 必须 ∈ `{api_usage_fix, template_arg_fix, include_fix, signature_align_fix, pipe_queue_fix, tilingdata_field_fix}`
-- **import_failed (kernel_side)**: 读 import traceback，核对 `pybind11.cpp` 的 `PYBIND11_MODULE` 名与 `model_new_ascendc.py` import 名一致、kernel ext `.so` 命名、`m.def` 注册符号。参考 `dsl2Ascendc_host.md` pybind 章节。audit 必填 `[IMPORT_TRACEBACK_CITATION]` `[ROOT_CAUSE]` `[FIX_PLAN]`，`[FIX_TYPE]` 必须 ∈ `{pybind_symbol_fix, kernel_ext_name_fix, kernel_export_fix}`；**明确拒绝** `ld_path_fix` / `abi_fix` / `toolkit_env_fix` / `cmakelists_fix` / `setup_py_fix` / `build_ascendc_fix`（属 `env_side`，不在本 subagent scope，应由主 agent 过滤）
-- **runtime_error**: 按 `.eval_status.execute.crash_signal` 分类定位（`SIGSEGV` → UB/GM 越界 / TQue 协议违反；`SIGABRT` → assertion / runtime check；`SIGBUS` → 对齐错；`SIGFPE` → 除零 / tiling 参数为 0），对照 `dsl2Ascendc_cross_core_sync.md` / `AscendCVerification.md` / `dsl2Ascendc_compute_*.md`。audit 必填 `[RUNTIME_ERROR_CITATION]` `[ROOT_CAUSE]` `[FIX_PLAN]`
-- **timeout**: 满足 `.eval_status.timeout_marker_present == true` 才进本分支（否则归 `execution_aborted`，主 agent 过滤）。读 log 尾部定位死锁位置，对照 `dsl2Ascendc_cross_core_sync.md` 分析 `SyncAll` / `SetFlag` / `WaitFlag` 配对、tiling 是否导致循环不收敛。audit 必填 `[SYNC_POINT_ANALYSIS]` `[ROOT_CAUSE]` `[FIX_PLAN]`
+- **build_failed**: 读 build log 定位 compile error 块，对照 AscendC API 参考文档核对签名 / 模板参数 / include
+- **import_failed (kernel_side)**: 读 import traceback，核对 pybind 符号、ext 模块名、`m.def` 注册（`env_side` 由主 agent 过滤，不进入本分支）
+- **runtime_error**: 按 `crash_signal` 分类（`SIGSEGV` 越界 / `SIGABRT` assertion / `SIGBUS` 对齐 / `SIGFPE` 除零），结合 stack trace 定位
+- **timeout**: 分析 `SyncAll` / `SetFlag` / `WaitFlag` 配对与 tiling 是否死锁
 
-> 详细工作流 / 每分支的 Step 1 输入输出 / Gate-F/A/V 协议：详见 `skills/ascendc/ascendc-debug/SKILL.md` Step 0.3 / Step 1-P/B/I/R/T。
+> 各分支的输入文件、audit section 必填项、FIX_TYPE 白名单、推荐参考资料、Gate-F/A/V 协议：详见 `skills/ascendc/ascendc-debug/SKILL.md` Step 0.3 / Step 1-P/B/I/R/T（单一事实源）。
 
 ## Operational Guidelines
 
