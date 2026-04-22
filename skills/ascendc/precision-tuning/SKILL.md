@@ -7,10 +7,11 @@ subagent:
   enabled: true
   agent_type: general
   reason: >
-    精度调优涉及取证→深度分析→修复→验证的多步循环,
-    需要 Agent 结合数值证据和代码理解做深度推理。
-    使用 subagent 允许自主多步执行和错误恢复。
-  timeout: 3600
+    覆盖 AscendC build / import / runtime / timeout / precision 五类失败。
+    每类失败都涉及取证→深度分析→修复→验证的多步循环,
+    需要 Agent 结合数值/日志证据和代码理解做深度推理。
+    subagent 内部按 final_status.failure_type 锁定一条分支, 不跨分支跳转。
+  timeout: 5400
   max_iterations: 60
 ---
 
