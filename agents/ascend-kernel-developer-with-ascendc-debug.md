@@ -491,11 +491,22 @@ while ac_iteration < max_ac_iterations:
 
 ---
 
-## Phase 6: 全量用例验证
+## Phase 6: 全量用例验证（只读，v3）
 
-将 `{output_dir}/<op_name>.json.bak` 恢复为 `{output_dir}/<op_name>.json`（覆盖精简后的版本，恢复全量测试用例），然后使用 `ascendc-translator` skill 自带的 `@references/evaluate_ascendc.sh` 进行一次全量用例验证。
+将 `{output_dir}/<op_name>.json.bak` 恢复为 `{output_dir}/<op_name>.json`（覆盖精简后的版本，恢复全量测试用例），通过 `utils/eval_wrapper.py` 运行一次全量验证。
 
-如果验证过程中出现失败用例，**仅允许修改 `{output_dir}/kernel/` 目录下的 AscendC kernel 文件**（禁止修改 `model_new_ascendc.py` 或其他任何文件）。每次修复后重新运行验证，**最多尝试 3 次**（含首次验证），超过次数或所有失败用例均已解决后，无论通过与否，直接记录结果并进入下一阶段。
+```bash
+cp {output_dir}/<op_name>.json.bak {output_dir}/<op_name>.json
+python3 utils/eval_wrapper.py --phase 6 --attempt 0 --task-dir {output_dir}
+```
+
+**不做任何修复**。无论成功失败，直接进入 Phase 7。
+
+失败用例的修复由 Phase 8 的 debug subagent 根据 `final_status.failure_type` 接手（findings §2.2, §7.2）。
+
+**产出**：
+- `{output_dir}/.eval_status/phase6_attempt0.json` — 机器可读全量验证结果
+- `{output_dir}/.eval_logs/phase6_attempt0_*.log` — 原始 evaluate 日志
 
 ---
 
