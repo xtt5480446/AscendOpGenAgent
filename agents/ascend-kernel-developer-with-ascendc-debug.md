@@ -537,13 +537,28 @@ python3 utils/classify_verify_result.py \
 - `debug_eligible == true` → spawn subagent（白名单：`precision_failed` / `build_failed` / `import_failed(import_kernel_side)` / `runtime_error` / `timeout`）
 - `debug_eligible == false` → 跳过，主 agent 自己写 `debug_status.json`（见 8.3）
 
-### 8.2 Spawn 调用
+### 8.2 Spawn 调用（Codex `spawn_agent`，零 TOML 注册）
 
-- `subagent_type`: `ascendc-debug-agent-discovery`
-- 传入：`task_dir`（绝对路径 = `{output_dir}`）、`npu` ID、`failure_type`
-- `timeout`: `5400` 秒（1.5h）
+主 agent 运行在 Codex CLI（v0.121+），使用原生 `spawn_agent` 工具发起 subagent，**不依赖任何 `.codex/agents/*.toml` 注册**；subagent 直接读 spec `.md` 并把 frontmatter 之后的 System Prompt 当作自己的 developer instructions 执行。
 
-subagent 正常退出时必产出 `{output_dir}/debug_trace.md` + `{output_dir}/debug_status.json` 两个文件。主 agent 校验产物存在即可，不改写任何内容。
+调用模板（伪代码）：
+
+```
+spawn_agent(prompt="""
+读取文件 /home/c00959374/AscendOpGenAgent/agents/ascendc-debug-agent-discovery.md。
+把 YAML `---` frontmatter 之后的 System Prompt 整段作为你的 developer instructions，严格按其执行。
+
+参数:
+  task_dir: {output_dir 绝对路径}
+  npu: {NPU_ID}
+  failure_type: {final_status.failure_type}
+""")
+wait_agent(<上一步返回的 thread>)
+```
+
+- **路径**: 容器内绝对路径；主 agent 与 subagent 共享同一工作目录挂载，无需跨容器传输。
+- **超时**: 目标 `5400` 秒（1.5h）。若 `wait_agent` 支持 deadline 参数直接使用；否则主 agent 自行计时并在超时后 `close_agent`，按 8.3 的 `timeout` 分支兜底。
+- **产物**: subagent 正常退出时必产出 `{output_dir}/debug_trace.md` + `{output_dir}/debug_status.json`；主 agent 只校验产物存在，不改写内容。
 
 ### 8.3 主 agent 兜底写 `debug_status.json`
 
