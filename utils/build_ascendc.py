@@ -58,6 +58,48 @@ def _extract_pybind_module_name(pybind_path: Path) -> str:
     return match.group(1)
 
 
+def _pybind11_includes() -> str:
+    """返回 `-I<python> -I<pybind11>` 形式的 include flags。
+
+    优先级:
+      1. torch 自带的 pybind11（`<torch>/include/pybind11/`）—— 与 libtorch 编译时
+         使用的 pybind11 ABI 对齐，推荐用于 torch extension。
+      2. pip 安装的 pybind11（`python3 -m pybind11 --includes`）—— fallback。
+
+    返回的字符串用空格分隔，便于后续 CMake `string(REPLACE " " ";" ...)` 转为 list。
+    """
+    import sysconfig
+    py_include = sysconfig.get_path("include")
+
+    # 1) torch 自带 pybind11
+    try:
+        import torch  # type: ignore
+        torch_include = Path(torch.__file__).resolve().parent / "include"
+        if (torch_include / "pybind11" / "pybind11.h").is_file():
+            return f"-I{py_include} -I{torch_include}"
+    except ImportError:
+        pass
+
+    # 2) fallback: pip 装的 pybind11 module
+    try:
+        result = subprocess.run(
+            ["python3", "-m", "pybind11", "--includes"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, check=True,
+        )
+        flags = result.stdout.strip()
+        if flags:
+            return flags
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    raise RuntimeError(
+        "Cannot locate pybind11 headers. Tried torch-bundled "
+        "(<torch>/include/pybind11/) and `python3 -m pybind11 --includes`. "
+        "Install pybind11 via `pip install pybind11`, or ensure torch is importable."
+    )
+
+
 def _format_cmake_list(items: list[str], indent: int = 4) -> str:
     prefix = " " * indent
     return "\n".join(f"{prefix}{item}" for item in items)
@@ -69,6 +111,7 @@ def _generate_cmakelists(
     module_name: str,
     sources: list[Path],
     ascend_path: Path,
+    pybind11_includes: str,
 ) -> str:
     include_dirs = [kernel_dir]
     catlass_include = kernel_dir / "catlass" / "include"
@@ -144,10 +187,9 @@ target_include_directories(pybind11_lib PRIVATE
   ${{TORCH_PATH}}/include
   ${{TORCH_PATH}}/include/torch/csrc/api/include
 )
-execute_process(COMMAND python3 -m pybind11 --includes
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  OUTPUT_VARIABLE PYBIND11_INC
-)
+# PYBIND11 includes are precomputed by utils/build_ascendc.py at file-generation time.
+# Priority: torch-bundled <torch>/include/pybind11/ (ABI-aligned with libtorch), then pip `python3 -m pybind11 --includes`.
+set(PYBIND11_INC "{pybind11_includes}")
 string(REPLACE " " ";" PYBIND11_INC ${{PYBIND11_INC}})
 target_compile_options(pybind11_lib PRIVATE
   ${{PYBIND11_INC}}
@@ -185,6 +227,8 @@ def build(task: str, soc_version: str, build_type: str, clean: bool) -> Path:
     build_dir = kernel_dir / "build"
     cmake_dir = build_dir / "_autogen_cmake"
     ascend_path = _detect_ascend_path()
+    pybind11_includes = _pybind11_includes()
+    print(f"[build_ascendc] pybind11 includes: {pybind11_includes}")
 
     if clean and build_dir.exists():
         shutil.rmtree(build_dir)
@@ -198,6 +242,7 @@ def build(task: str, soc_version: str, build_type: str, clean: bool) -> Path:
             module_name=module_name,
             sources=sources,
             ascend_path=ascend_path,
+            pybind11_includes=pybind11_includes,
         ),
         encoding="utf-8",
     )
