@@ -151,6 +151,148 @@ python3 skills/ascendc/precision-tuning/scripts/precision_gate.py \
 ⛔ **Gate-F 未通过 → 停止, 检查错误输出。不要在没有取证数据的情况下分析代码。**
 如果报错含 `FileNotFoundError`，先确认 `{task_dir}/kernel/pybind11.cpp` 存在，再检查 `utils/verification_ascendc.py` 路径。
 
+> 1-P 分支继续走 Step 2（精度深度分析 4 Sub-step）→ Step 3（修复）→ Step 4（重编译+验证，走 Gate-V 的精度语义）→ Step 5/6。
+
+---
+
+### Step 1-B: Build Error Analysis（build_failed 分支）
+
+**输入**:
+- `{task_dir}/.eval_status/latest.json` — 结构化状态 + `log_path` + `compile.error_summary`
+- `{task_dir}/.eval_logs/phase{N}_attempt{M}.log` — 原始 build log（compile 阶段 stderr 全文）
+- `{task_dir}/kernel/*.cpp` / `*.h` — 当前 kernel 源码
+- `{task_dir}/trace.md` — Phase 1-7 上下文（Phase 4 ac_iterations 里记录了历次 build 尝试）
+
+**Agent 任务**:
+1. 读 build log，提取 compile error / fatal error / undefined reference / template instantiation error 块（每块最多 10 行，按 stderr 顺序）
+2. 对照 `skills/ascendc/ascendc-translator/references/dsl2Ascendc_compute_*.md`、`dsl2Ascendc_host.md`、`TileLang-AscendC-API-Mapping.md` 找 API 用法差异（签名、模板参数、include 依赖）
+3. 写 `{task_dir}/precision_tuning/precision_audit_{attempt}.md` 含（Gate-BUILD-A 必填）：
+   - `[COMPILE_ERROR_CITATION]` — 原文摘录 error 块 + 对应 `kernel/*.cpp` 行号（引用不少于 1 处 error）
+   - `[ROOT_CAUSE]` — 根因（签名不匹配 / 模板参数错 / include 缺失 / pipe-queue 协议违反 等）
+   - `[FIX_PLAN]` — 文件 / 函数 / 行号级修改列表
+   - `[FIX_TYPE]` — 必须 ∈ `{api_usage_fix, template_arg_fix, include_fix, signature_align_fix, pipe_queue_fix, tilingdata_field_fix}`；不在白名单的类型 Gate-A 直接 reject
+4. 修改 `{task_dir}/kernel/*.cpp` / `*.h`（**绝对不动** `utils/build_ascendc.py` / `CMakeLists.txt` / `setup.py` / `utils/` 下任何文件）
+5. 通过 Gate-通用 + Gate-BUILD-A 验证：
+   ```bash
+   python3 skills/ascendc/precision-tuning/scripts/precision_gate.py \
+       --step audit --op-name {op_name} --task-name {task_name} --attempt {attempt}
+   ```
+
+**推荐参考资料**:
+- `skills/ascendc/ascendc-translator/references/dsl2Ascendc_compute_vector.md`（向量 API）
+- `skills/ascendc/ascendc-translator/references/dsl2Ascendc_compute_scalar.md`（标量 API）
+- `skills/ascendc/ascendc-translator/references/dsl2Ascendc_host.md`（host 侧 tiling / workspace）
+- `skills/ascendc/ascendc-translator/references/TileLang-AscendC-API-Mapping.md`（API 权威参考）
+- `skills/ascendc/ascendc-translator/references/AscendC_knowledge/api_reference/`（API 详细文档）
+
+**Step 4（共用）**: 修复后调 `utils/eval_wrapper.py --phase 8 --attempt {attempt} --task-dir {task_dir}` 重跑，然后走 `Gate-BUILD-V`：
+- `eval_status.failed_step` 从 `compile` 推进到 `import`/`execute`/`verify`/`null` = 进步（跨分支语义下仍算 `progressed_to_new_failure_type`，本 session 结束）
+- 仍卡在 `compile` 且 error 行未变 = 停滞
+- `compile` 阶段 passed 且 `failure_type != build_failed` = 本分支完成（不切分支，写 `debug_status.json` 后退出）
+
+---
+
+### Step 1-I: Import Error Analysis（import_failed + import_kernel_side 分支）
+
+**输入**:
+- `{task_dir}/.eval_status/latest.json` — 结构化状态，确认 `import_subtype == import_kernel_side`（若是 `import_env_side` 应已被 Step 0.3 过滤）
+- `{task_dir}/.eval_status/import_traceback.log` 或 `.eval_logs/phase{N}_attempt{M}.log` — 原始 import traceback
+- `{task_dir}/kernel/pybind11.cpp` — pybind 注册入口（`PYBIND11_MODULE` 名、导出符号）
+- `{task_dir}/kernel/*_kernel.h` / `*.cpp` — 被 pybind 引用的 kernel 符号
+- `{task_dir}/model_new_ascendc.py` — import 的 ext module 名（只读！不可改）
+- `{task_dir}/trace.md` — 上下文
+
+**Agent 任务**:
+1. 读 traceback，定位缺失的符号 / 模块名 / pybind 入口
+2. 对照 `skills/ascendc/ascendc-translator/references/dsl2Ascendc_host.md`（pybind 章节）核对：
+   - `PYBIND11_MODULE` 的第一个参数（模块名）是否与 `model_new_ascendc.py` 中 `import` 的名字一致
+   - kernel ext 的 `.so` 文件命名与 import 名是否匹配
+   - 导出的函数符号是否与 `pybind11.cpp` 中 `m.def(...)` 注册的名字一致
+3. 写 `{task_dir}/precision_tuning/precision_audit_{attempt}.md` 含（Gate-IMPORT-A 必填）：
+   - `[IMPORT_TRACEBACK_CITATION]` — 原文摘录 traceback（至少 `ImportError` / `ModuleNotFoundError` / `OSError: cannot open shared object` 的关键行）
+   - `[ROOT_CAUSE]` — 根因（pybind 模块名不一致 / kernel ext 名称错 / 符号未导出）
+   - `[FIX_PLAN]` — 修改点（限定 `pybind11.cpp` 的 `PYBIND11_MODULE` / `m.def` 注册行，或 kernel 侧 `extern "C"` / 导出符号名）
+   - `[FIX_TYPE]` — 必须 ∈ `{pybind_symbol_fix, kernel_ext_name_fix, kernel_export_fix}`；**明确拒绝** `ld_path_fix` / `abi_fix` / `toolkit_env_fix` / `cmakelists_fix` / `setup_py_fix` / `build_ascendc_fix`（这些属于 env_side，不在本 subagent 的 scope）
+4. 修改 `{task_dir}/kernel/pybind11.cpp` 或 kernel 符号导出处（**不动** `model_new_ascendc.py`、`utils/build_ascendc.py`、`CMakeLists.txt`、`setup.py`）
+5. 通过 Gate-通用 + Gate-IMPORT-A 验证（命令同 Step 1-B）
+
+**推荐参考资料**:
+- `skills/ascendc/ascendc-translator/references/dsl2Ascendc_host.md`（pybind 绑定规范）
+- `skills/ascendc/precision-tuning/references/`（若有环境变量 / pybind 相关条目）
+- `skills/ascendc/ascendc-translator/references/TileLang-AscendC-API-Mapping.md`（`extern "C"` 导出规范）
+
+**Step 4（共用）**: 修复后调 `utils/eval_wrapper.py --phase 8 --attempt {attempt} --task-dir {task_dir}` 重跑，然后走 `Gate-IMPORT-V`：
+- `eval_status.import.status == passed` = 本分支完成
+- 仍卡在 `import` 且 traceback 未变 = 停滞
+- `import` 通过但 `failure_type` 变为 `build_failed` / `runtime_error` / `precision_failed` = 进步但跨分支，本 session 结束
+
+---
+
+### Step 1-R: Runtime Error Analysis（runtime_error 分支）
+
+**输入**:
+- `{task_dir}/.eval_status/latest.json` — 结构化状态 + `execute.crash_signal`（SIGSEGV / SIGABRT / SIGBUS / SIGFPE）
+- `{task_dir}/.eval_logs/phase{N}_attempt{M}.log` — stderr / stack trace / core dump 信息
+- `{task_dir}/kernel/*.cpp` / `*.h` — kernel 源码
+- `{task_dir}/trace.md` — 上下文
+
+**Agent 任务**:
+1. 读 stderr / stack trace，提取 crash 位置（函数名 / 行号 / 同步点）；若 log 中只有 signal 编号没有 stack trace，结合 `crash_signal` 类型定位可能原因：
+   - `SIGSEGV` → 越界访存（UB / GM 访存越界、Tensor 未分配就读取、TQue 协议违反）
+   - `SIGABRT` → assertion 失败 / 运行时检查失败（AscendC runtime 内部 check）
+   - `SIGBUS` → 内存对齐错（未满足 32/64/128 字节对齐）
+   - `SIGFPE` → 除零 / 浮点异常（tiling 参数为 0、分母未保护）
+2. 对照 `skills/ascendc/ascendc-translator/references/dsl2Ascendc_cross_core_sync.md`、`AscendCVerification.md`、`dsl2Ascendc_compute_*.md` 找 API 约束 / 同步点 / 对齐要求
+3. 写 `{task_dir}/precision_tuning/precision_audit_{attempt}.md` 含（Gate-RUNTIME-A 必填）：
+   - `[RUNTIME_ERROR_CITATION]` — 原文摘录 stderr / stack trace（含 crash_signal、函数名、行号）
+   - `[ROOT_CAUSE]` — 根因（越界 / 对齐 / 同步缺失 / TQue 协议违反 / 除零）
+   - `[FIX_PLAN]` — 文件 / 函数 / 行号级修改列表
+4. 修改 `{task_dir}/kernel/*.cpp` / `*.h`
+5. 通过 Gate-通用 + Gate-RUNTIME-A 验证
+
+**推荐参考资料**:
+- `skills/ascendc/ascendc-translator/references/dsl2Ascendc_cross_core_sync.md`（跨核同步 / SyncAll）
+- `skills/ascendc/ascendc-translator/references/AscendCVerification.md`（runtime 语义与验证）
+- `skills/ascendc/ascendc-translator/references/dsl2Ascendc_compute_vector.md`（对齐与 DataCopyPad）
+
+**Step 4（共用）**: 修复后调 `utils/eval_wrapper.py --phase 8 --attempt {attempt} --task-dir {task_dir}` 重跑，然后走 `Gate-RUNTIME-V`：
+- `eval_status.failure_type != runtime_error` 或 crash 位置 / signal 变化 = 进步（若仍是 runtime_error 但位置变则视为 `progressed`）
+- `failure_type` 变为 `precision_failed` = 进步但跨分支，本 session 结束
+
+---
+
+### Step 1-T: Timeout Analysis（timeout 分支）
+
+**输入**:
+- `{task_dir}/.eval_status/latest.json` — 结构化状态；必须满足 `failure_type == timeout` 且 `timeout_marker_present == true`（否则视为 `execution_aborted`，不应进本分支）
+- `{task_dir}/.eval_logs/phase{N}_attempt{M}.log` — 超时前的 stdout/stderr 尾部（最后一条日志提示死锁 / 死循环位置）
+- `{task_dir}/kernel/*.cpp` / `*.h` — kernel 源码（重点看 `SyncAll` / `WaitFlag` / `SetFlag` / `for` 循环边界）
+- `{task_dir}/kernel/{op_name}_tiling.h` + `kernel/pybind11.cpp` — tiling 配置（block_dim / tile_size）
+- `{task_dir}/trace.md` — 上下文
+
+**Agent 任务**:
+1. 读 log 尾部，定位超时时 kernel 执行到哪一步（若能判断）；结合 `duration_sec` 与预期耗时量级判断是死锁（duration ≈ timeout 阈值且无输出推进）还是性能降级
+2. 对照 `skills/ascendc/ascendc-translator/references/dsl2Ascendc_cross_core_sync.md` 分析：
+   - `SyncAll` 是否遗漏或多余（多余的 SyncAll 在部分核未到达时死锁）
+   - `SetFlag` / `WaitFlag` 配对是否一致
+   - Tiling 参数（`block_dim`、`tile_size`、归约轴切分）是否导致循环不收敛
+3. 写 `{task_dir}/precision_tuning/precision_audit_{attempt}.md` 含（Gate-TIMEOUT-A 必填）：
+   - `[SYNC_POINT_ANALYSIS]` — 枚举 kernel 中所有同步点（`SyncAll` / `SetFlag` / `WaitFlag`）及其配对关系，标出疑似死锁点
+   - `[ROOT_CAUSE]` — 根因（同步缺失 / 同步多余 / 死循环 / tiling 死锁）
+   - `[FIX_PLAN]` — 文件 / 函数 / 行号级修改列表
+4. 修改 `{task_dir}/kernel/*.cpp` / `*.h`（**不动** tiling host 逻辑若超出 `kernel/pybind11.cpp` 的 TilingFunc）
+5. 通过 Gate-通用 + Gate-TIMEOUT-A 验证
+
+**推荐参考资料**:
+- `skills/ascendc/ascendc-translator/references/dsl2Ascendc_cross_core_sync.md`（同步原语与死锁反模式）
+- `skills/ascendc/ascendc-translator/references/dsl2Ascendc_host.md`（tiling / workspace 分配）
+- `skills/ascendc/ascendc-translator/references/AscendCVerification.md`（runtime 约束）
+
+**Step 4（共用）**: 修复后调 `utils/eval_wrapper.py --phase 8 --attempt {attempt} --task-dir {task_dir}` 重跑，然后走 `Gate-TIMEOUT-V`：
+- `eval_status.duration_sec < timeout_threshold` 且 `failure_type != timeout` = 本分支完成（无论对错 — 精度对错由后续判断，但 timeout 语义已解除）
+- 仍超时且 duration 基本不变 = 停滞
+- 不再超时但转 `runtime_error` / `precision_failed` = 进步但跨分支，本 session 结束
+
 ---
 
 ### Step 2: 深度分析 + 修复计划 (Agent 推理, 核心步骤)
