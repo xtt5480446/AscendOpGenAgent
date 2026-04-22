@@ -544,7 +544,10 @@ python3 utils/classify_verify_result.py \
 调用模板（伪代码）：
 
 ```
-spawn_agent(prompt="""
+spawn_agent(
+    model="gpt-5.4",
+    reasoning_effort="high",
+    message="""
 读取文件 /home/c00959374/AscendOpGenAgent/agents/ascendc-debug-agent-discovery.md。
 把 YAML `---` frontmatter 之后的 System Prompt 整段作为你的 developer instructions，严格按其执行。
 
@@ -552,12 +555,14 @@ spawn_agent(prompt="""
   task_dir: {output_dir 绝对路径}
   npu: {NPU_ID}
   failure_type: {final_status.failure_type}
-""")
-wait_agent(<上一步返回的 thread>)
+""",
+)
+wait_agent(targets=[<spawn 返回的 thread>], timeout_ms=5_400_000)
 ```
 
+- **模型 / reasoning**: 强制 `model="gpt-5.4"`、`reasoning_effort="high"`；不依赖 parent session 继承，跨 launcher / 环境行为一致。
 - **路径**: 容器内绝对路径；主 agent 与 subagent 共享同一工作目录挂载，无需跨容器传输。
-- **超时**: 目标 `5400` 秒（1.5h）。若 `wait_agent` 支持 deadline 参数直接使用；否则主 agent 自行计时并在超时后 `close_agent`，按 8.3 的 `timeout` 分支兜底。
+- **超时**: `wait_agent(timeout_ms=5_400_000)` 即 1.5h；超时后按 8.3 的 `timeout` 分支兜底（必要时再 `close_agent`）。
 - **产物**: subagent 正常退出时必产出 `{output_dir}/debug_trace.md` + `{output_dir}/debug_status.json`；主 agent 只校验产物存在，不改写内容。
 
 ### 8.3 主 agent 兜底写 `debug_status.json`
