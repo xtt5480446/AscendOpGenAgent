@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .common import GateOutcome
+from .common import GateOutcome, MAX_ATTEMPTS
 
 
 REQUIRED_SECTIONS = ("[SYNC_POINT_ANALYSIS]", "[ROOT_CAUSE]", "[FIX_PLAN]")
@@ -71,7 +71,7 @@ class TimeoutBranch:
             elif no_timeout:
                 loop_signal = "CONTINUE"
             else:
-                loop_signal = "STOP" if attempt >= 1 else "CONTINUE"
+                loop_signal = "STOP" if attempt >= MAX_ATTEMPTS - 1 else "CONTINUE"
         return GateOutcome(
             "GATE-TIMEOUT-V",
             loop_signal != "STOP",

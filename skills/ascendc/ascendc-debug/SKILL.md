@@ -12,7 +12,6 @@ subagent:
     需要 Agent 结合数值/日志证据和代码理解做深度推理。
     subagent 内部按 final_status.failure_type 锁定一条分支, 不跨分支跳转。
   timeout: 5400
-  max_iterations: 3
 ---
 
 ## What I do
@@ -111,7 +110,7 @@ awk '/^```json/,/^```$/' "{task_dir}/trace.md" | jq '.debug_eligible, .failure_t
   - `import_kernel_side` → 进入 Step 1-I
   - `import_env_side` → 异常情况（主 agent 已过滤）；直接写 `debug_trace.md` + `debug_status.json` 标 `phase8_outcome: skipped_env_issue` 后退出
 
-**跨分支跳转禁止（v3 硬约束）**：
+**跨分支跳转禁止（硬约束）**：
 
 - 若某轮修复后 `verify_status.failure_type` 变化（如 `build_failed` → `precision_failed`），视为"本分支 Gate-V 取得进展"
 - **不切换分支**，本次 session 结束；`debug_trace.md` / `debug_status.json` 标 `phase8_outcome: progressed_to_new_failure_type`

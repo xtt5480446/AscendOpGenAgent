@@ -23,10 +23,9 @@ import os
 import re
 from pathlib import Path
 
-from .common import GateOutcome
+from .common import GateOutcome, MAX_ATTEMPTS
 
 
-MAX_ATTEMPTS = 2
 MAX_STAGNANT_ROUNDS = 2
 
 

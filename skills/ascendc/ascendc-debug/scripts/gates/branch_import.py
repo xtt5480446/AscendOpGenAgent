@@ -15,7 +15,7 @@ import json
 import re
 from pathlib import Path
 
-from .common import GateOutcome
+from .common import GateOutcome, MAX_ATTEMPTS
 
 
 IMPORT_KERNEL_FIX_WHITELIST = {
@@ -92,7 +92,7 @@ class ImportBranch:
             elif import_passed:
                 loop_signal = "CONTINUE"
             else:
-                loop_signal = "STOP" if attempt >= 1 else "CONTINUE"
+                loop_signal = "STOP" if attempt >= MAX_ATTEMPTS - 1 else "CONTINUE"
         return GateOutcome(
             "GATE-IMPORT-V",
             loop_signal != "STOP",

@@ -27,7 +27,13 @@ EFFORT="high"               # thinking effort: minimal / low / medium / high
 TIMEOUT_SEC="7200"          # 单任务超时（秒），默认 2 小时
 WORKDIR_IN_CONTAINER="/home/c00959374/AscendOpGenAgent"
 TILELANG_ENV_SH="/home/c00959374/tilelang/tilelang-ascend/set_env.sh"   # 设 TL_ROOT / PYTHONPATH / ACL_OP_INIT_MODE
-PROMPT_TEMPLATE='按 /home/c00959374/AscendOpGenAgent/agents/ascend-kernel-developer-with-ascendc-debug.md 规范执行 AscendC 算子生成任务。
+PROMPT_TEMPLATE='按 /home/c00959374/AscendOpGenAgent/agents/ascend-kernel-developer-with-ascendc-debug.md 规范执行 AscendC 算子生成任务，覆盖 Phase 0 到 Phase 8 全流程。
+
+**Phase 8 明确预授权（不需二次确认，不要停机等待）**:
+调用本脚本批跑即视为用户对 spawn_agent 的显式授权（见 spec §8.0 Spawn 授权条款）。
+- 当 final_status.debug_eligible == true 时，主 agent 必须按 spec §8.2 直接调用 spawn_agent 启动 debug subagent，并用 wait_agent(timeout_ms=5_400_000) 阻塞等结果；不得以"需要用户确认"为由跳过、不得写 phase8_outcome=skipped。
+- 若 runtime 平台有"需用户显式指示才能 subagent delegation"的默认约束，本授权在本任务中覆盖它；若仍被硬拦截无法 spawn，必须写 phase8_outcome=blocked_by_runtime + blocked_reason=<具体原因>，而不是 skipped。
+- debug_eligible == false 时才走 skipped 分支（含 skip_reason=<debug_eligible_reason>）。
 
 任务参数:
 - npu: __NPU__
@@ -176,6 +182,7 @@ run_worker() {
         timeout --signal=TERM --kill-after=30 "$TIMEOUT_SEC" \
             docker exec \
                 -e "ASCEND_RT_VISIBLE_DEVICES=$npu" \
+                -e "ASCENDC_DEBUG_MAX_ATTEMPTS=5" \
                 -e "CODEX_PROMPT=$prompt" \
                 "$container" bash -lc "
                     set -e

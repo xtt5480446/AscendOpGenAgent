@@ -2,7 +2,7 @@
 """
 precision_gate.py — AscendC debug Gate 2 层路由入口
 
-架构（v3，findings.md §3.3 ①）:
+架构（findings.md §3.3 ①）:
   - 通用层 (gates.common): 反作弊 / AST / 结构 / verify_status / audit 文件
   - 分支层 (gates.branch_*): 按 .verify_status/latest.json 的 failure_type 派发
       * precision_failed → PrecisionBranch

@@ -21,6 +21,27 @@ from pathlib import Path
 from typing import Optional
 
 
+# ---------------------------------------------------------------------------
+# 跨分支共享的 attempt 上限（single source of truth）。
+#
+# 默认值 5。优先级（高 → 低）:
+#   1. Subagent 在 Step 0 根据 failure_type / 错误复杂度动态设置 env var
+#      （`export ASCENDC_DEBUG_MAX_ATTEMPTS=<N>` 或 inline `ASCENDC_DEBUG_MAX_ATTEMPTS=<N> python3 ...`）
+#   2. Launcher / CI 层通过 `docker exec -e` 注入
+#      （见 `utils/run_benchmark_ascendc_codex_with_debug.sh`）
+#   3. 本文件默认值 5
+#
+# 每次 Gate 脚本以新 Python 进程启动时按 env 当场读值，不缓存；因此 subagent
+# 在 bash session 里 `export` 后的所有后续 gate 调用都会生效。
+# ---------------------------------------------------------------------------
+try:
+    MAX_ATTEMPTS = int(os.environ.get("ASCENDC_DEBUG_MAX_ATTEMPTS", "5"))
+    if MAX_ATTEMPTS < 1:
+        MAX_ATTEMPTS = 5
+except (TypeError, ValueError):
+    MAX_ATTEMPTS = 5
+
+
 @dataclass
 class GateOutcome:
     gate: str

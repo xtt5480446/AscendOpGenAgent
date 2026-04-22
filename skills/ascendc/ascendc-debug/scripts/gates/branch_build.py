@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 
-from .common import GateOutcome
+from .common import GateOutcome, MAX_ATTEMPTS
 
 
 BUILD_FIX_WHITELIST = {
@@ -91,7 +91,7 @@ class BuildBranch:
                 # 进展了但还没最终通过 → session 结束（跨分支不切换）
                 loop_signal = "CONTINUE"
             else:
-                loop_signal = "STOP" if attempt >= 1 else "CONTINUE"
+                loop_signal = "STOP" if attempt >= MAX_ATTEMPTS - 1 else "CONTINUE"
         ok = loop_signal in ("PASS", "CONTINUE")
         return GateOutcome(
             "GATE-BUILD-V",

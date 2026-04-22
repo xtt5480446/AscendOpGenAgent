@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .common import GateOutcome
+from .common import GateOutcome, MAX_ATTEMPTS
 
 
 REQUIRED_SECTIONS = ("[RUNTIME_ERROR_CITATION]", "[ROOT_CAUSE]", "[FIX_PLAN]")
@@ -80,6 +80,10 @@ class RuntimeBranch:
                 loop_signal = "CONTINUE" if checks["crash_signal_changed"] else "STOP"
             else:
                 loop_signal = "CONTINUE"
+            # attempt cap 兜底：即使 crash_signal 每轮在变也不能无限循环
+            if loop_signal == "CONTINUE" and attempt >= MAX_ATTEMPTS - 1:
+                loop_signal = "STOP"
+                checks["max_attempts_reached"] = True
         return GateOutcome(
             "GATE-RUNTIME-V",
             loop_signal != "STOP",

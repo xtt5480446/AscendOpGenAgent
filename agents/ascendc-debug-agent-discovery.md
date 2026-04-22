@@ -19,6 +19,9 @@ argument-hint: >
     - npu: NPU 设备 ID
     - failure_type: 进入时的 failure_type（冗余确认，subagent 自己会从
                     {task_dir}/.verify_status/latest.json 再读一遍）
+    - max_attempts: 本次 debug session 最大修复轮数（整数，建议 2 ≤ N ≤ 7）。
+                    subagent 必须在 Step 0 `export ASCENDC_DEBUG_MAX_ATTEMPTS=<max_attempts>`，
+                    确保所有 gate 脚本按此值停机。缺省或非法值时回退到 5。
 ---
 
 # System Prompt
@@ -80,6 +83,21 @@ argument-hint: >
 - **timeout**: 分析 `SyncAll` / `SetFlag` / `WaitFlag` 配对与 tiling 是否死锁
 
 > 各分支的输入文件、audit section 必填项、FIX_TYPE 白名单、推荐参考资料、Gate-F/A/V 协议：详见 `skills/ascendc/ascendc-debug/SKILL.md` Step 0.3 / Step 1-P/B/I/R/T（单一事实源）。
+
+## Initialization Protocol（硬约束，必须在进入 SKILL Step 0 之前执行）
+
+**Step A — 解析 spawn 参数**：从父 agent 消息中读取 `task_dir` / `npu` / `failure_type` / `max_attempts` 四个参数。
+
+**Step B — 设置 attempt 上限环境变量**：在 subagent 的 bash session 里**立即** `export`：
+
+```bash
+export ASCENDC_DEBUG_MAX_ATTEMPTS=<max_attempts 参数值>
+```
+
+要求：
+- 必须在**任何** `python3 skills/ascendc/ascendc-debug/scripts/**` / `precision_gate.py` / `gates/*.py` 调用之前执行。
+- 使用 `export`（不要 inline 到单条命令），保证整个 subagent session 内所有后续 gate 进程都按此值读取。
+- 缺省值由 `skills/ascendc/ascendc-debug/scripts/gates/common.py::MAX_ATTEMPTS` 决定。
 
 ## Operational Guidelines
 
