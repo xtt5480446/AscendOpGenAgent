@@ -21,3 +21,5 @@ benchmarks/NPUKernelBench/level5/
 utils/pack_codex_sessions.sh
 # Archives produced by utils/pack_codex_sessions.sh
 projects_*_*.tar.gz
+# Local device-env-setup config (per-user)
+CLAUDE.md
