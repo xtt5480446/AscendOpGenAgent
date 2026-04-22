@@ -245,7 +245,9 @@ AscendOpGenAgent/
 │   ├── AKG-triton.md           # 主编排 Agent
 │   ├── benchmark-scheduler.md
 │   ├── kernelgen-workflow.md   # 子 Agent（代码生成工作流）
-│   ├── ascend-kernel-developer.md
+│   ├── ascend-kernel-developer.md                # 主编排 Agent（Phase 0-7）
+│   ├── ascend-kernel-developer-with-ascendc-debug.md  # 同上 + Phase 8 条件性 spawn debug subagent
+│   ├── precision-tuning-discovery.md             # Debug subagent（5 类失败分支）
 │   └── performance-optimizer.md
 ├── benchmarks/                 # 评测数据集存放目录
 │   ├── KernelBench/
