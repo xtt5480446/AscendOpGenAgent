@@ -27,13 +27,13 @@ argument-hint: >
 - 遇到的错误信息
 - 是否发生违规路径：外部 web 检索、直接整体复制参考实现、PyTorch / torch_npu 语义回退
 
-## 字段权威：主 agent `Trace 字段契约`
-
-> **所有定量字段（次数 / 路径 / 阶段结果）的字段名与取值来源以 `agents/ascend-kernel-developer-with-ascendc-debug.md` 的 `## Trace 字段契约` 小节为唯一事实源。** 本 SKILL.md 的模板只引用契约字段名（`phase3_tl_iterations` / `phase4_ac_iterations` / `phase6_full_verify_runs` / `phase{3,4,6}_final_result` / `tl_last_error_summary` / `ac_last_error_summary` / `phase4_ac_cap_violated` / `trace_drift_warnings`），**禁止**在字段名位置出现执行器命令名（`evaluate_*.sh` / `verification_*.py` / `classify_verify_result.py`）。命令名只能出现在说明性文字或错误摘要原文引用里。
+> 定量字段（次数 / 路径 / 阶段结果）的字段名与取值来源以 `agents/ascend-kernel-developer-with-ascendc-debug.md` 的 `Trace 字段契约` 表为准。
 
 ## 输出格式
 
-将以下内容写入 `{output_dir}/trace.md`：
+向 `{output_dir}/trace.md` 写入两段内容，顺序执行：
+
+### 1. Markdown 正文（阶段记录 + 违规路径）
 
 ```markdown
 # Trace: {算子名称}
@@ -96,62 +96,47 @@ argument-hint: >
 - 说明: {如发生，精确记录触发阶段与具体行为}
 ```
 
-### 记录原则
+#### 记录原则
 
 1. **精确引用**: 错误信息、评测输出使用原文，不要改写或总结
 2. **行为序列**: 每轮迭代记录 agent 的实际操作（改了什么文件、改了什么逻辑），而非笼统的"修复了 bug"
 3. **走偏分析**: 重点记录 agent 做了哪些最终被证明无效的尝试，这是 meta-agent 优化 harness 的核心输入
 4. **省略成功**: 如果某阶段一次通过且无异常，简要记录即可，不需要展开
 
----
+### 2. 末尾追加 final_status JSON block
 
-## 新增步骤：产出 final_status JSON block
+作为 Phase 7 verdict 快照，供 Phase 8 spawn 决策直接消费。**只追加、不改写既有内容**；不得写独立的 `final_status.json` / `ac_history.json`，Phase 4 历史内嵌在 `ac_iterations` 字段里。
 
-执行完上述 Trace 记录后，**追加**一段 fenced JSON 作为 `final_status` block，作为 Phase 7 收尾时机器可读的 verdict 快照。下游（Phase 8 spawn 决策、自动化报告）直接消费此 block，不再事后推断 `failure_type`。
+#### 输入来源
 
-### 硬约束
+1. `{task_dir}/.verify_status/latest.json`（`classify_verify_result` 产出）：
+   ```bash
+   python3 skills/ascendc/ascendc-debug/scripts/verify_status.py --task-dir {task_dir} --summarize
+   ```
+2. `{output_dir}/.phase4_history.json`（主 agent 在调用 trace-recorder 前写入的数组；缺失则用 `[]`），原样嵌入 `ac_iterations`。
+3. 目录状态：`kernel/` 是否含 `*.cpp`/`*.h`；`model_new_ascendc.py` 是否 AST 退化（`python3 skills/ascendc/ascendc-translator/scripts/validate_ascendc_impl.py {output_dir}/model_new_ascendc.py` 非零退出即 `has_degradation=true`）。
 
-- 只允许在 `{output_dir}/trace.md` **末尾 append**；禁止改写已写入的任何内容。
-- 禁止写独立的 `final_status.json` / `ac_history.json` 文件。Phase 4 迭代历史**内嵌**在 `final_status.ac_iterations` 数组里。
-- 整个 JSON 必须用 fenced ` ```json ` 代码块包裹。
+#### `failure_type` 判定优先级（顺序不可变，原文 findings.md §5.3）
 
-### 输入来源
+1. `kernel/` 为空 → `no_kernel`
+2. `model_new_ascendc.py` AST 退化 → `degraded`
+3. Phase 3 失败且未进 Phase 4 → `tilelang_only_failed`
+4. `verify_status.latest.json.failure_type == "execution_aborted"` → 照搬 `execution_aborted`（**专指**外部原因：SSH 断线 / Docker daemon 不可达 / outer harness kill。NPU `aicore exception` / `MTE illegal` / `ACL stream synchronize failed (5xxxxx)` 已在 `classify_verify_result.py` 归为 `runtime_error` + `exit_signal=NPU_AICORE_EXCEPTION`，不落本 bucket）
+5. 否则照搬 `verify_status.latest.json.failure_type`（`success` / `precision_failed` / `build_failed` / `import_failed` / `runtime_error` / `timeout`）
 
-1. **`{task_dir}/.verify_status/latest.json`**（classify_verify_result 产出，唯一事实源）
-   - 读取方式：调用 `skills/ascendc/ascendc-debug/scripts/verify_status.py`
-     ```bash
-     python3 skills/ascendc/ascendc-debug/scripts/verify_status.py \
-         --task-dir {task_dir} --summarize
-     ```
-   - 该脚本对外 API：`load_latest_status(task_dir)` 返回已校验的 dict；`summarize_for_trace(status)` 返回 `failure_type` / `import_subtype` / `abort_subtype` / `last_evaluate_phase` / `last_evaluate_attempt` / `failed_step` 等字段子集。
+前三条一律 `debug_eligible = false`。
 
-2. **Phase 4 迭代历史**：主 agent 在调用 trace-recorder 前写入 `{output_dir}/.phase4_history.json`（数组，每项形如 `{attempt, verifier_error, conductor_suggestion, verify_status_path, ended_at}`）。trace-recorder 读取后原样嵌入 `ac_iterations`。若文件不存在，用空数组 `[]` 兜底。
+#### `debug_eligible` 计算规则
 
-3. **目录状态**
-   - `kernel/` 目录是否为空（glob `*.cpp` / `*.h` 均无 → 为空）
-   - `model_new_ascendc.py` 是否 AST 退化 —— 可调：
-     ```bash
-     python3 skills/ascendc/ascendc-translator/scripts/validate_ascendc_impl.py \
-         {output_dir}/model_new_ascendc.py
-     ```
-     （非零退出码或报告中出现退化 marker → `has_degradation = true`）
+同时满足下列三条才可能为 `true`，否则 `false`：
 
-### 判定优先级（**严格按此顺序，原文摘录自 findings.md §5.3，顺序不可变**）
+- `failure_type ∈ {precision_failed, build_failed, import_failed, runtime_error, timeout}`
+- `has_kernel == true` 且 `has_degradation == false`
+- 若 `failure_type == "import_failed"`，额外要求 `import_subtype == "import_kernel_side"`（`import_env_side` 或 `null` 属环境问题，不在 kernel/ scope）
 
-1. `kernel/` 目录为空 → `failure_type = "no_kernel"`，`debug_eligible = false`
-2. `model_new_ascendc.py` AST 退化 → `failure_type = "degraded"`，`debug_eligible = false`
-3. Phase 3 失败且未进到 Phase 4 → `failure_type = "tilelang_only_failed"`，`debug_eligible = false`
-4. `verify_status.latest.json.failure_type == "execution_aborted"` → 照搬 `execution_aborted` + `debug_eligible = false`（**专指**外部原因：SSH 断线 / Docker daemon 不可达 / outer harness kill 等，subagent 无法处理）。**注意**: NPU kernel 侧 `aicore exception` / `MTE illegal` / `ACL stream synchronize failed (error code:5xxxxx)` 等设备端异常已在 `classify_verify_result.py` 中归为 `runtime_error`（带 `exit_signal: "NPU_AICORE_EXCEPTION"`），**不**落入本 bucket
-5. 否则 → 照搬 `verify_status.latest.json.failure_type`（`success` / `precision_failed` / `build_failed` / `import_failed` / `runtime_error` / `timeout`）
+`debug_eligible_reason` 填判据原文（例：`"failure_type=import_failed but import_subtype=import_env_side; env issue out of scope"`）。
 
-### `debug_eligible` 计算规则
-
-- **先看**：`failure_type ∈ {precision_failed, build_failed, import_failed, runtime_error, timeout}` 且 `has_kernel == true` 且 `has_degradation == false`。三项同时成立才可能为 true；否则 `debug_eligible = false`。
-- **再看**：若 `failure_type == "import_failed"`，额外要求 `import_subtype == "import_kernel_side"`；若是 `import_env_side` 或 `null`，则 `debug_eligible = false`（环境库/LD_LIBRARY_PATH 问题不在 kernel/ scope）。
-- 其他分支（`success` / `degraded` / `no_kernel` / `tilelang_only_failed` / `execution_aborted`）一律 `debug_eligible = false`。
-- `debug_eligible_reason` 填写得出该结论的关键判据（例如 `"failure_type=import_failed but import_subtype=import_env_side; env issue out of scope"`）。
-
-### final_status JSON schema（schema_version = 2，findings.md §2.4）
+#### Schema（schema_version = 2，findings.md §2.4）
 
 ```json
 {
@@ -179,38 +164,15 @@ argument-hint: >
 }
 ```
 
-字段来源速查：
+#### 字段来源速查
 
 | 字段 | 来源 |
 |------|------|
-| `failure_type` | 判定优先级规则（见上） |
-| `import_subtype` / `abort_subtype` | `verify_status.latest.json` 同名字段；若 `failure_type` 非对应类别则 `null` |
-| `has_kernel` | `kernel/` 目录是否含 `.cpp`/`.h` |
-| `has_compiled_kernel` | `kernel/` 下是否存在 `.so` / 编译产物 |
+| `failure_type` | 判定优先级规则 |
+| `import_subtype` / `abort_subtype` | `verify_status.latest.json` 同名字段；类别不匹配则 `null` |
+| `has_kernel` / `has_compiled_kernel` | `kernel/` 下是否含 `.cpp`/`.h` / `.so` |
 | `has_degradation` | `validate_ascendc_impl.py` 退出码 |
-| `last_evaluate_phase` / `last_verify_status_path` | `verify_status.latest.json.phase` / 对应 `phase{N}_attempt{M}.json` 路径 |
-| `tl_iterations_used` | Phase 3 实际迭代次数（从会话信息汇总） |
-| `ac_iterations` | 直接内嵌 `{output_dir}/.phase4_history.json` 数组内容（不存在则 `[]`） |
+| `last_evaluate_phase` / `last_verify_status_path` | `verify_status.latest.json.phase` / 对应 `phase{N}_attempt{M}.json` |
+| `tl_iterations_used` | Phase 3 实际迭代次数 |
+| `ac_iterations` | 原样嵌入 `.phase4_history.json`（缺失则 `[]`） |
 | `debug_eligible` / `debug_eligible_reason` | 按上述规则计算 |
-
-### 输出位置与格式
-
-将整个 JSON 用 fenced ` ```json ` 代码块包裹，**追加**到 `{output_dir}/trace.md` 末尾：
-
-````markdown
-## final_status
-
-```json
-{
-  "schema_version": 2,
-  "failure_type": "...",
-  ...
-  "debug_eligible": true,
-  "debug_eligible_reason": "..."
-}
-```
-````
-
-- **禁止**写独立文件（如 `final_status.json`、`ac_history.json`）。
-- **禁止**对 `trace.md` 之前的任何内容做修改；只做 append。
-- `trace.md` 在 Phase 7 写完后即**全程只读**（Phase 8 的 debug subagent 产物落到 `debug_trace.md` / `debug_status.json`，与本 block 互不干扰）。
