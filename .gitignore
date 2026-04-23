@@ -18,3 +18,5 @@ extra-info/
 level_5_output/
 level_5_output_v2/
 benchmarks/NPUKernelBench/level5/
+# precision-debug 运行时产物（由 debug_precision_template.py 占位符替换而来）
+debug_*_precision.py
