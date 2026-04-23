@@ -25,6 +25,14 @@
       - [Triton](#triton)
       - [AscendC](#ascendc)
   - [项目结构](#项目结构)
+  - [单用例多 Shape 支持](#单用例多-shape-支持)
+    - [输入规格（算子描述文件）](#输入规格算子描述文件)
+      - [单 Shape 格式（向后兼容）](#单-shape-格式向后兼容)
+      - [多 Shape 格式](#多-shape-格式)
+    - [输出规格（性能报告）](#输出规格性能报告)
+      - [单 Shape 性能报告](#单-shape-性能报告)
+      - [多 Shape 性能报告](#多-shape-性能报告)
+    - [适用场景](#适用场景)
   - [许可证](#许可证)
 
 ## 核心功能
@@ -246,9 +254,7 @@ AscendOpGenAgent/
 │   ├── benchmark-scheduler.md
 │   ├── kernelgen-workflow.md   # 子 Agent（代码生成工作流）
 │   ├── ascend-kernel-developer.md                # 主编排 Agent（Phase 0-7）
-│   ├── ascend-kernel-developer-with-ascendc-debug.md  # 同上 + Phase 8 条件性 spawn debug subagent
-│   ├── ascendc-debug-agent.md                         # Debug subagent（构建式审计）
-│   ├── ascendc-debug-agent-discovery.md               # Debug subagent（发现式审计，5 类失败分支）
+│   ├── ascendc-debug-agent-discovery.md               # Debug subagent（发现式ascendc debug agent）
 │   └── performance-optimizer.md
 ├── benchmarks/                 # 评测数据集存放目录
 │   ├── KernelBench/
