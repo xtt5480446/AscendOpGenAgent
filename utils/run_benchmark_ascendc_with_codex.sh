@@ -17,6 +17,27 @@
 
 set -euo pipefail
 
+sanitize_name() {
+    local raw="${1:-}"
+    local safe
+    safe="$(printf '%s' "${raw}" | tr -cs 'A-Za-z0-9' '_')"
+    safe="${safe#_}"
+    safe="${safe%_}"
+    if [[ -z "${safe}" ]]; then
+        safe="task"
+    fi
+    printf '%s' "${safe}" | tr '[:upper:]' '[:lower:]'
+}
+
+make_remote_eval_workdir() {
+    local stage="$1"
+    local task_name="$2"
+    local npu_id="$3"
+    local safe_name
+    safe_name="$(sanitize_name "${task_name}")"
+    printf 'workdir_remote_eval_%s_%s_npu%s' "${stage}" "${safe_name}" "${npu_id}"
+}
+
 # ── 默认值 ──
 BENCHMARK_DIR=""
 LEVEL=""
@@ -180,7 +201,7 @@ if [[ "$USE_PARALLEL" == true ]]; then
     declare -A npu_tasks
     npu_index=0
     for id in "${OP_IDS[@]}"; do
-        if [[ -v OP_FILES[$id] ]]; then
+        if [[ -n "${OP_FILES[$id]:-}" ]]; then
             npu=${NPU_ARRAY[$((npu_index % NPU_COUNT))]}
             npu_tasks[$npu]+="${id} "
             npu_index=$((npu_index + 1))
@@ -197,15 +218,20 @@ if [[ "$USE_PARALLEL" == true ]]; then
                     file="${OP_FILES[$id]}"
                     filename=$(basename "$file")
                     op_name="${filename%.*}"
+                    TL_REMOTE_EVAL_WORKDIR="$(make_remote_eval_workdir "tl" "$op_name" "$npu")"
+                    AC_REMOTE_EVAL_WORKDIR="$(make_remote_eval_workdir "ac" "$op_name" "$npu")"
                     TARGET_OP_DIR="${OUTPUT_DIR}/${op_name}"
 
                     mkdir -p "$TARGET_OP_DIR"
 
                     START_TIME=$(date +%s)
 
-                    PROMPT="执行 AGENT.md 中的完整流程，使用当前agent生成ascendC算子，npu=${npu}，算子描述文件为 ${file}，输出到 ${TARGET_OP_DIR}/"
+                    PROMPT="执行 AGENT.md 中的完整流程，使用当前agent生成ascendC算子，npu=${npu}，算子描述文件为 ${file}，输出到 ${TARGET_OP_DIR}/。当前环境已注入唯一远端评测目录：TileLang 使用 REMOTE_EVAL_WORKDIR_TL=${TL_REMOTE_EVAL_WORKDIR}，AscendC 使用 REMOTE_EVAL_WORKDIR_AC=${AC_REMOTE_EVAL_WORKDIR}。远端评测时不要复用其他任务目录。"
 
-                    if timeout "$TIMEOUT_SEC" codex exec --dangerously-bypass-approvals-and-sandbox "$PROMPT" \
+                    if timeout "$TIMEOUT_SEC" env \
+                        REMOTE_EVAL_WORKDIR_TL="${TL_REMOTE_EVAL_WORKDIR}" \
+                        REMOTE_EVAL_WORKDIR_AC="${AC_REMOTE_EVAL_WORKDIR}" \
+                        codex exec --dangerously-bypass-approvals-and-sandbox "$PROMPT" \
                         >> "${OUTPUT_DIR}/npu_${npu}.log" 2>&1; then
 
                         END_TIME=$(date +%s)
@@ -258,6 +284,8 @@ else
 
         # 提取不带后缀的文件名，例如 "31_ELU.py" 变成 "31_ELU"
         op_name="${filename%.*}"
+        TL_REMOTE_EVAL_WORKDIR="$(make_remote_eval_workdir "tl" "$op_name" "$NPU_ID")"
+        AC_REMOTE_EVAL_WORKDIR="$(make_remote_eval_workdir "ac" "$op_name" "$NPU_ID")"
 
         # 构建当前算子的专属输出子目录
         TARGET_OP_DIR="${OUTPUT_DIR}/${op_name}"
@@ -274,9 +302,12 @@ else
 
         START_TIME=$(date +%s)
 
-        PROMPT="执行 AGENT.md 中的完整流程，使用当前agent生成ascendC算子，npu=${NPU_ID}，算子描述文件为 ${file}，输出到 ${TARGET_OP_DIR}/"
+        PROMPT="执行 AGENT.md 中的完整流程，使用当前agent生成ascendC算子，npu=${NPU_ID}，算子描述文件为 ${file}，输出到 ${TARGET_OP_DIR}/。当前环境已注入唯一远端评测目录：TileLang 使用 REMOTE_EVAL_WORKDIR_TL=${TL_REMOTE_EVAL_WORKDIR}，AscendC 使用 REMOTE_EVAL_WORKDIR_AC=${AC_REMOTE_EVAL_WORKDIR}。远端评测时不要复用其他任务目录。"
 
-        if timeout "$TIMEOUT_SEC" codex exec --dangerously-bypass-approvals-and-sandbox "$PROMPT"; then
+        if timeout "$TIMEOUT_SEC" env \
+            REMOTE_EVAL_WORKDIR_TL="${TL_REMOTE_EVAL_WORKDIR}" \
+            REMOTE_EVAL_WORKDIR_AC="${AC_REMOTE_EVAL_WORKDIR}" \
+            codex exec --dangerously-bypass-approvals-and-sandbox "$PROMPT"; then
             END_TIME=$(date +%s)
             ELAPSED=$((END_TIME - START_TIME))
             echo "| ${id} | ${filename} |  成功 | ${ELAPSED} |" >> "$REPORT_FILE"
