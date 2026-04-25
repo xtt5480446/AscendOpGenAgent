@@ -1,8 +1,12 @@
 import copy
 import importlib.util
 import inspect
+import json as _json_mod
+import os
 import statistics
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -269,7 +273,7 @@ def _run_performance(op: str, impls, warmup: int, repeat: int, seed: int):
             sys.path.remove(str(WORKDIR))
 
 
-def _print_report(report):
+def _print_report(report, summary_only=False):
     print("=" * 88)
     print("Performance Report")
     print("=" * 88)
@@ -280,7 +284,7 @@ def _print_report(report):
     print(f"Repeat    : {report['repeat']}")
     print(f"Seed      : {report['seed']}")
 
-    if report["inputs"]:
+    if not summary_only and report["inputs"]:
         print("-" * 88)
         print("Inputs")
         print("-" * 88)
@@ -301,31 +305,43 @@ def _print_report(report):
         else:
             print(f"{result['impl']:<12} {'ERROR':<8} {'-':>12} {'-':>12} {'-':>12} {'-':>12} {'-':>12}")
 
-    for result in report["results"]:
-        print("-" * 88)
-        print(f"{result['impl']} -> {result['model_path'] or 'N/A'}")
-        if result["ok"]:
-            for case_result in result["case_results"]:
-                samples = ", ".join(f"{value:.3f}" for value in case_result["latency_ms"])
-                print(
-                    f"case[{case_result['index']}] mean={case_result['mean_ms']:.3f} ms, "
-                    f"median={case_result['median_ms']:.3f} ms, samples(ms): [{samples}]"
-                )
-        else:
-            print(f"error      : {result['error']}")
+    if not summary_only:
+        for result in report["results"]:
+            print("-" * 88)
+            print(f"{result['impl']} -> {result['model_path'] or 'N/A'}")
+            if result["ok"]:
+                for case_result in result["case_results"]:
+                    samples = ", ".join(f"{value:.3f}" for value in case_result["latency_ms"])
+                    print(
+                        f"case[{case_result['index']}] mean={case_result['mean_ms']:.3f} ms, "
+                        f"median={case_result['median_ms']:.3f} ms, samples(ms): [{samples}]"
+                    )
+            else:
+                print(f"error      : {result['error']}")
 
 
 def _parse_args(argv):
-    if len(argv) < 2 or len(argv) > 6:
-        print("Usage: python utils/performance.py <op> [impl]")
+    json_out = None
+    filtered = []
+    i = 1
+    while i < len(argv):
+        if argv[i] == "--json-out" and i + 1 < len(argv):
+            json_out = argv[i + 1]
+            i += 2
+        else:
+            filtered.append(argv[i])
+            i += 1
+
+    if len(filtered) < 1 or len(filtered) > 5:
+        print("Usage: python utils/performance.py <op> [impl] [warmup] [repeat] [seed]")
         print("  impl: reference | tilelang | ascendc | all")
         raise SystemExit(1)
 
-    op = argv[1]
-    impl = argv[2] if len(argv) >= 3 else "all"
-    warmup = int(argv[3]) if len(argv) >= 4 else 5
-    repeat = int(argv[4]) if len(argv) >= 5 else 10
-    seed = int(argv[5]) if len(argv) >= 6 else 0
+    op = filtered[0]
+    impl = filtered[1] if len(filtered) >= 2 else "all"
+    warmup = int(filtered[2]) if len(filtered) >= 3 else 5
+    repeat = int(filtered[3]) if len(filtered) >= 4 else 10
+    seed = int(filtered[4]) if len(filtered) >= 5 else 0
 
     if impl == "all":
         impls = ["reference", "tilelang", "ascendc"]
@@ -337,13 +353,68 @@ def _parse_args(argv):
     if warmup < 0 or repeat <= 0:
         raise SystemExit("warmup must be >= 0 and repeat must be > 0")
 
-    return op, impls, warmup, repeat, seed
+    return op, impls, warmup, repeat, seed, json_out
+
+
+def _run_impl_isolated(op, impl, warmup, repeat, seed, json_out_path):
+    """Run a single impl in an isolated subprocess, return parsed JSON report or None."""
+    cmd = [sys.executable, str(Path(__file__).resolve()),
+           op, impl, str(warmup), str(repeat), str(seed),
+           "--json-out", json_out_path]
+    subprocess.run(cmd)
+    p = Path(json_out_path)
+    if p.is_file():
+        with open(p) as f:
+            return _json_mod.load(f)
+    return None
+
+
+def _merge_reports(reports):
+    """Merge per-impl reports into a single combined report."""
+    base = None
+    for r in reports:
+        if r is None:
+            continue
+        if base is None:
+            base = r
+            continue
+        base["results"].extend(r.get("results", []))
+        base["errors"].extend(r.get("errors", []))
+    return base
 
 
 def main():
-    op, impls, warmup, repeat, seed = _parse_args(sys.argv)
+    op, impls, warmup, repeat, seed, json_out = _parse_args(sys.argv)
+
+    if len(impls) > 1:
+        # Run each impl in an isolated subprocess so that a crash
+        # (e.g. tilelang aicore exception) cannot taint later impls.
+        tmp_dir = tempfile.mkdtemp(prefix="perf_iso_")
+        sub_reports = []
+        for impl in impls:
+            tmp_json = os.path.join(tmp_dir, f"{impl}.json")
+            sub_report = _run_impl_isolated(op, impl, warmup, repeat, seed, tmp_json)
+            sub_reports.append(sub_report)
+        import shutil
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        report = _merge_reports(sub_reports)
+        if report is None:
+            print("All implementations failed.")
+            raise SystemExit(1)
+        _print_report(report, summary_only=True)
+        if json_out:
+            with open(json_out, "w") as f:
+                _json_mod.dump(report, f, indent=2)
+        if not any(r["ok"] for r in report["results"]):
+            raise SystemExit(1)
+        return
+
     report = _run_performance(op, impls, warmup, repeat, seed)
     _print_report(report)
+
+    if json_out:
+        with open(json_out, "w") as f:
+            _json_mod.dump(report, f, indent=2)
 
     if not any(result["ok"] for result in report["results"]):
         raise SystemExit(1)
